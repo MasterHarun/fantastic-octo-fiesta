@@ -1,3 +1,5 @@
 /target
 .env
 Cargo.lock
+.rustfmt.toml
+old_main.rs
