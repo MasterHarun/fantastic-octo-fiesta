@@ -1,13 +1,12 @@
 use serenity::{
   async_trait,
+  http::Http,
   model::{
     gateway::Ready,
     id::{ChannelId, UserId},
     prelude::{
-      application_command::ApplicationCommandInteraction,
       command::{Command, CommandOptionType},
       interaction::{Interaction, InteractionResponseType},
-      webhook::Webhook,
     },
   },
   prelude::*,
@@ -16,28 +15,45 @@ use serenity::{
 use std::sync::{Arc, Mutex};
 use std::{collections::HashMap, env};
 
-// use reqwest::Client;
 use dotenvy::dotenv;
 use serde::Deserialize;
 use serde_json::json;
 
+extern crate pretty_env_logger;
+#[macro_use] extern crate log;
+
 // Define a handler struct with a Mutex to store the chat history
 struct Handler {
   chat_histories: Arc<Mutex<HashMap<(UserId, ChannelId), String>>>,
+  http: Arc<Http>,
 }
 
 impl Handler {
-  fn new() -> Self {
+  // Create a new Handler with the given Http instance
+  fn new(http: Arc<Http>) -> Self {
     Self {
       chat_histories: Arc::new(Mutex::new(HashMap::new())),
+      http,
     }
   }
 }
 
 #[async_trait]
 impl EventHandler for Handler {
+  // Event handler for when the bot is ready
+  async fn ready(&self, _: Context, ready: Ready) {
+    println!("{} is connected!", ready.user.name);
+
+    // Register application commands for the bot
+    if let Err(e) = register_application_commands(&self.http).await {
+      println!("Error registering application commands: {:?}", e);
+    }
+  }
+
+  // Event handler for when an interaction is created
   async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
     if let Interaction::ApplicationCommand(command) = interaction {
+      // Extract the content from the command's options
       let content = command
         .data
         .options
@@ -50,6 +66,7 @@ impl EventHandler for Handler {
         let api_key = env::var("OPENAI_API_KEY").expect("Expected OPENAI_API_KEY to be set");
         let user_channel_key = (command.user.id, command.channel_id);
 
+        // Get the chat history for the user and channel
         let chat_history = {
           let mut chat_histories = self.chat_histories.lock().unwrap();
           chat_histories
@@ -58,10 +75,11 @@ impl EventHandler for Handler {
             .clone()
         };
 
+        // Generate the AI response using the chat history and content
         let result =
           generate_ai_response(content, model, &api_key, user_channel_key, chat_history).await;
 
-        // Update the chat history
+        // Update the chat history with the AI response
         if let Some(ref ai_response) = result {
           let mut chat_histories = self.chat_histories.lock().unwrap();
           let history = chat_histories.get_mut(&user_channel_key).unwrap();
@@ -119,6 +137,7 @@ impl EventHandler for Handler {
           }
         }
       } else {
+        // If the command is missing input text, send an error message
         if let Err(why) = command
           .create_interaction_response(&ctx.http, |response| {
             response.kind(InteractionResponseType::ChannelMessageWithSource);
@@ -136,6 +155,7 @@ impl EventHandler for Handler {
   }
 }
 
+// Deserialize the API response into these structs
 #[derive(Debug, Deserialize)]
 struct ApiResponse {
   choices: Option<Vec<Choice>>,
@@ -151,11 +171,12 @@ struct Message {
   content: String,
 }
 
+// Generate an AI response based on the given input and chat history
 async fn generate_ai_response(
   prompt: &str,
   model: &str,
   api_key: &str,
-  user_channel_key: (UserId, ChannelId),
+  _user_channel_key: (UserId, ChannelId),
   chat_history: String,
 ) -> Option<String> {
   // Create a client for the OpenAI API
@@ -194,18 +215,15 @@ async fn generate_ai_response(
 
         match response_value {
           Ok(value) => {
-            // println!("Raw JSON response: {:?}", value);
             // Deserialize the Value into the ApiResponse struct
             let ai_response: Result<ApiResponse, _> = serde_json::from_value(value.clone());
 
             match ai_response {
               Ok(api_response) => {
                 if let Some(choices) = api_response.choices {
-                  // println!("choices:{:?}", choices);
+                  // Extract the AI response text from the choices and format it
                   let response_text = choices[0].message.content.trim().replace('\n', " ");
                   if response_text.is_empty() {
-                    // println!("API response text: {:?}", choices[0].message.content);
-                    // println!("API request with prompt: {}", prompt);
                     println!("AI generated an empty response");
                     None
                   } else {
@@ -228,8 +246,8 @@ async fn generate_ai_response(
             None
           }
         }
-        // ...
       } else {
+        // If the API request failed, print the status, headers, and response text for debugging purposes
         println!("API request failed with status: {}", response.status());
         println!("API request failed with headers: {:?}", response.headers());
         let response_text = response
@@ -237,27 +255,80 @@ async fn generate_ai_response(
           .await
           .unwrap_or_else(|_| "Failed to read response text".to_string());
         println!("API request failed with response: {}", response_text);
+        // Return None since the request failed
         None
       }
     }
     Err(err) => {
+      // If there was an error sending the API request, print the error for debugging purposes
       println!("Error sending API request: {:?}", err);
+			// Return None since the request could not be sent
       None
     }
   }
 }
 
+async fn register_application_commands(http: &Http) -> Result<(), Box<dyn std::error::Error>> {
+  let commands = http.get_global_application_commands().await?;
+
+  let commands_to_register = vec![("ask", "Your message to the AI", CommandOptionType::String)];
+
+  for (name, description, options) in commands_to_register {
+    let command_exists = commands.iter().any(|c| c.name == *name);
+    if !command_exists {
+      let command_result = Command::create_global_application_command(http, |command| {
+        command
+          .name(name)
+          .description(description)
+          .create_option(|option| {
+            option
+              .name(name)
+              .description(description)
+              .kind(options)
+              .required(true)
+          })
+      })
+      .await;
+
+      match command_result {
+        Ok(command) => {
+          println!("Successfully registered application command: {:?}", command);
+        }
+        Err(e) => {
+          println!("Error registering application command {}: {:?}", name, e);
+        }
+      }
+    } else {
+      println!("Command {} already exists, skipping...", name);
+    }
+  }
+
+  println!(
+    "Successfully registered application commands: {:#?}",
+    commands
+  );
+
+  Ok(())
+}
 
 #[tokio::main]
 async fn main() {
   dotenv().ok();
+	pretty_env_logger::init();
   println!("running");
   let token = env::var("DISCORD_TOKEN").expect("DISCORD_TOKEN not found");
+  let application_id =
+    env::var("DISCORD_APPLICATION_ID").expect("DISCORD_APPLICATION_ID not found");
+
   let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
+  let http = Arc::new(Http::new_with_application_id(
+    &token,
+    application_id.parse::<u64>().unwrap(),
+  ));
   let mut client = serenity::Client::builder(&token, intents)
     .intents(intents)
-    .event_handler(Handler::new())
+    .event_handler(Handler::new(Arc::clone(&http)))
     .await
     .expect("Error creating client");
 
