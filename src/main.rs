@@ -1,3 +1,4 @@
+use sensible_env_logger::try_init_custom_env_and_builder;
 use serenity::{
   async_trait,
   http::Http,
@@ -19,8 +20,9 @@ use dotenvy::dotenv;
 use serde::Deserialize;
 use serde_json::json;
 
-extern crate pretty_env_logger;
-#[macro_use] extern crate log;
+extern crate sensible_env_logger;
+#[macro_use]
+extern crate log;
 
 // Define a handler struct with a Mutex to store the chat history
 struct Handler {
@@ -42,11 +44,11 @@ impl Handler {
 impl EventHandler for Handler {
   // Event handler for when the bot is ready
   async fn ready(&self, _: Context, ready: Ready) {
-    println!("{} is connected!", ready.user.name);
+    info!("{} is connected!", ready.user.name);
 
     // Register application commands for the bot
     if let Err(e) = register_application_commands(&self.http).await {
-      println!("Error registering application commands: {:?}", e);
+      error!("Error registering application commands: {:?}", e);
     }
   }
 
@@ -62,6 +64,13 @@ impl EventHandler for Handler {
         .and_then(|val| val.as_str());
 
       if let Some(content) = content {
+        // Get the user and their user# who sent the message
+        let user = &command.user.name;
+        let user_id = &command.user.discriminator;
+
+        // Log the user and their user# along with the command input
+        info!("User {}#{}: {}", user, user_id, content);
+
         let model = "gpt-3.5-turbo";
         let api_key = env::var("OPENAI_API_KEY").expect("Expected OPENAI_API_KEY to be set");
         let user_channel_key = (command.user.id, command.channel_id);
@@ -94,7 +103,7 @@ impl EventHandler for Handler {
           })
           .await
         {
-          eprintln!("Error acknowledging interaction: {:?}", why);
+          error!("Error acknowledging interaction: {:?}", why);
         }
 
         // Then send the follow-up message with the AI response
@@ -107,9 +116,9 @@ impl EventHandler for Handler {
               })
               .await
             {
-              eprintln!("Error sending response: {:?}", why);
+              error!("Error sending response: {:?}", why);
               // Debugging: Log the command, interaction token, and application ID
-              eprintln!(
+              debug!(
                 "Debugging info: command: {:?}, interaction token: {:?}, application ID: {:?}",
                 command,
                 command.token,
@@ -125,9 +134,9 @@ impl EventHandler for Handler {
               })
               .await
             {
-              eprintln!("Error sending error message: {:?}", why);
+              error!("Error sending error message: {:?}", why);
               // Debugging: Log the command, interaction token, and application ID
-              eprintln!(
+              debug!(
                 "Debugging info: command: {:?}, interaction token: {:?}, application ID: {:?}",
                 command,
                 command.token,
@@ -148,7 +157,7 @@ impl EventHandler for Handler {
           })
           .await
         {
-          eprintln!("Error sending error message: {:?}", why);
+          error!("Error sending error message: {:?}", why);
         }
       }
     }
@@ -191,7 +200,7 @@ async fn generate_ai_response(
   let params = json!({
     "model": model,
     "messages": [{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": &last_message_id}, {"role": "user", "content": prompt}],
-    "max_tokens": 50,
+    "max_tokens": 100,
     "temperature": 0.5,
     // "n": 1,
     // "stop": ["/n"]
@@ -210,7 +219,6 @@ async fn generate_ai_response(
   match response {
     Ok(response) => {
       if response.status().is_success() {
-        // println!("{:?}", response);
         let response_value: Result<serde_json::Value, _> = response.json().await;
 
         match response_value {
@@ -224,57 +232,63 @@ async fn generate_ai_response(
                   // Extract the AI response text from the choices and format it
                   let response_text = choices[0].message.content.trim().replace('\n', " ");
                   if response_text.is_empty() {
-                    println!("AI generated an empty response");
+                    debug!("AI generated an empty response");
                     None
                   } else {
-                    println!("AI generated response: {}", response_text);
+                    info!("AI generated response: {}", response_text);
                     Some(response_text)
                   }
                 } else {
-                  println!("API response does not contain 'choices' field");
+                  debug!("API response does not contain 'choices' field");
                   None
                 }
               }
               Err(err) => {
-                println!("Error deserializing API response: {:?}", err);
+                error!("Error deserializing API response: {:?}", err);
                 None
               }
             }
           }
           Err(err) => {
-            println!("Error deserializing API response into Value: {:?}", err);
+            error!("Error deserializing API response into Value: {:?}", err);
             None
           }
         }
       } else {
         // If the API request failed, print the status, headers, and response text for debugging purposes
-        println!("API request failed with status: {}", response.status());
-        println!("API request failed with headers: {:?}", response.headers());
+        debug!("API request failed with status: {}", response.status());
+        debug!("API request failed with headers: {:?}", response.headers());
         let response_text = response
           .text()
           .await
           .unwrap_or_else(|_| "Failed to read response text".to_string());
-        println!("API request failed with response: {}", response_text);
+        debug!("API request failed with response: {}", response_text);
         // Return None since the request failed
         None
       }
     }
     Err(err) => {
       // If there was an error sending the API request, print the error for debugging purposes
-      println!("Error sending API request: {:?}", err);
-			// Return None since the request could not be sent
+      error!("Error sending API request: {:?}", err);
+      // Return None since the request could not be sent
       None
     }
   }
 }
 
+// Registers the application commands that the Discord bot can receive.
 async fn register_application_commands(http: &Http) -> Result<(), Box<dyn std::error::Error>> {
+  // Get the existing gloval application commands
   let commands = http.get_global_application_commands().await?;
 
+  // Define the commands to register, along with their name, description, and options
   let commands_to_register = vec![("ask", "Your message to the AI", CommandOptionType::String)];
 
+  // Check if the commands already exist
   for (name, description, options) in commands_to_register {
     let command_exists = commands.iter().any(|c| c.name == *name);
+
+    // If the command doesn't exist, create it and add it as a global command
     if !command_exists {
       let command_result = Command::create_global_application_command(http, |command| {
         command
@@ -290,20 +304,22 @@ async fn register_application_commands(http: &Http) -> Result<(), Box<dyn std::e
       })
       .await;
 
+      // Log the result of registering the command
       match command_result {
         Ok(command) => {
-          println!("Successfully registered application command: {:?}", command);
+          debug!("Successfully registered application command: {:?}", command);
         }
         Err(e) => {
-          println!("Error registering application command {}: {:?}", name, e);
+          error!("Error registering application command {}: {:?}", name, e);
         }
       }
     } else {
-      println!("Command {} already exists, skipping...", name);
+      debug!("Command {} already exists, skipping...", name);
     }
   }
 
-  println!(
+  // Log the list of registered commands
+  debug!(
     "Successfully registered application commands: {:#?}",
     commands
   );
@@ -314,14 +330,25 @@ async fn register_application_commands(http: &Http) -> Result<(), Box<dyn std::e
 #[tokio::main]
 async fn main() {
   dotenv().ok();
-	pretty_env_logger::init();
-  println!("running");
+  info!("running");
+  // Get env vars
   let token = env::var("DISCORD_TOKEN").expect("DISCORD_TOKEN not found");
   let application_id =
     env::var("DISCORD_APPLICATION_ID").expect("DISCORD_APPLICATION_ID not found");
 
+  // Initialize the logger
+  let _ = try_init_custom_env_and_builder(
+    &env::var("RUST_LOG").expect("RUST_LOG not found"),
+    &env::var("GLOBAL_LOG_LEVEL").expect("GLOBAL_LOG_LEVEL not found"),
+    env!("CARGO_PKG_NAME"),
+    module_path!(),
+    sensible_env_logger::pretty::formatted_timed_builder,
+  );
+
+  // Set the gateway intents to receive guild messages and message content
   let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
+  // Create an HTTP client and Discord bot client
   let http = Arc::new(Http::new_with_application_id(
     &token,
     application_id.parse::<u64>().unwrap(),
@@ -332,7 +359,8 @@ async fn main() {
     .await
     .expect("Error creating client");
 
+  // Start the Discord bot client and log any errors
   if let Err(why) = client.start().await {
-    println!("Client error: {:?}", why);
+    error!("Client error: {:?}", why);
   }
 }
