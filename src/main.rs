@@ -12,9 +12,11 @@ use serenity::{
   },
   prelude::*,
 };
+use unicode_segmentation::UnicodeSegmentation;
 
 use std::sync::{Arc, Mutex};
 use std::{collections::HashMap, env};
+use tokio::time::{timeout, Duration};
 
 use dotenvy::dotenv;
 use serde::Deserialize;
@@ -55,27 +57,51 @@ impl EventHandler for Handler {
   // Event handler for when an interaction is created
   async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
     if let Interaction::ApplicationCommand(command) = interaction {
-      // Extract the content from the command's options
-      let content = command
-        .data
-        .options
-        .get(0)
-        .and_then(|opt| opt.value.as_ref())
-        .and_then(|val| val.as_str());
+      if command.data.name == "chat" {
+        let input = command
+          .data
+          .options
+          .get(0)
+          .and_then(|opt| opt.value.as_ref())
+          .and_then(|value| value.as_str())
+          .unwrap_or("");
 
-      if let Some(content) = content {
-        // Get the user and their user# who sent the message
-        let user = &command.user.name;
-        let user_id = &command.user.discriminator;
+        // Acknowledge the interaction within 3 seconds
+        let acknowledge_result = timeout(
+          Duration::from_millis(2500),
+          command.create_interaction_response(&ctx.http, |response| {
+            response.kind(InteractionResponseType::DeferredChannelMessageWithSource)
+          }),
+        )
+        .await;
 
-        // Log the user and their user# along with the command input
-        info!("User {}#{}: {}", user, user_id, content);
+        match acknowledge_result {
+          Ok(Ok(_)) => {
+            debug!("Acknowledged the interaction");
+          }
+          Ok(Err(why)) => {
+            error!("Error acknowledging interaction: {:?}", why);
+            return;
+          }
+          Err(_) => {
+            error!("Timed out acknowledging interaction");
+            return;
+          }
+        }
 
+        // Get the user and channel IDs for this interaction
+        let user_id = command.user.id;
+        let channel_id = command.channel_id;
+        let user_name = command.user.name.clone();
+
+        // Log the user's input with their name and ID
+        info!("User {}#{}: {}", user_name, command.user.discriminator, input);
+
+        // Generate AI response here
+        let api_key = env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not found");
         let model = "gpt-3.5-turbo";
-        let api_key = env::var("OPENAI_API_KEY").expect("Expected OPENAI_API_KEY to be set");
-        let user_channel_key = (command.user.id, command.channel_id);
+        let user_channel_key = (user_id, channel_id);
 
-        // Get the chat history for the user and channel
         let chat_history = {
           let mut chat_histories = self.chat_histories.lock().unwrap();
           chat_histories
@@ -84,83 +110,66 @@ impl EventHandler for Handler {
             .clone()
         };
 
-        // Generate the AI response using the chat history and content
-        let result =
-          generate_ai_response(content, model, &api_key, user_channel_key, chat_history).await;
+        let ai_response =
+          generate_ai_response(input, model, &api_key, user_channel_key, chat_history).await;
 
-        // Update the chat history with the AI response
-        if let Some(ref ai_response) = result {
+        // Update the chat history with the user's input and the AI's response
+        {
           let mut chat_histories = self.chat_histories.lock().unwrap();
-          let history = chat_histories.get_mut(&user_channel_key).unwrap();
-          history.push_str(" ");
-          history.push_str(ai_response);
+          let history = chat_histories
+            .entry(user_channel_key)
+            .or_insert_with(String::new);
+          history.push_str(&format!("User: {}\n", input));
+          if let Some(ref response) = ai_response {
+            history.push_str(&format!("AI: {}\n", response));
+          }
+
+          // Truncate the chat history to a certain number of tokens
+          let TOKEN_LIMIT = 4096;
+          // debug!("Chat history before truncation:\n{}", history);
+          truncate_chat_history(history, TOKEN_LIMIT);
+          // debug!("Chat history after truncation:\n{}", history);
         }
 
-        // Acknowledge the interaction first
-        if let Err(why) = command
-          .create_interaction_response(&ctx.http, |response| {
-            response.kind(InteractionResponseType::DeferredChannelMessageWithSource)
+        // Send the follow-up message
+        match command
+          .create_followup_message(&ctx.http, |message| {
+            message.content(
+              ai_response
+                .unwrap_or_else(|| "Error: AI response could not be generated.".to_string()),
+            );
+            message
           })
           .await
         {
-          error!("Error acknowledging interaction: {:?}", why);
-        }
-
-        // Then send the follow-up message with the AI response
-        match result {
-          Some(ai_response) => {
-            if let Err(why) = command
-              .create_followup_message(&ctx.http, |message| {
-                message.content(&ai_response);
-                message
-              })
-              .await
-            {
-              error!("Error sending response: {:?}", why);
-              // Debugging: Log the command, interaction token, and application ID
-              debug!(
-                "Debugging info: command: {:?}, interaction token: {:?}, application ID: {:?}",
-                command,
-                command.token,
-                ctx.http.application_id(),
-              );
-            }
+          Ok(_) => {
+            debug!("Sent the follow-up message");
           }
-          None => {
-            if let Err(why) = command
-              .create_followup_message(&ctx.http, |message| {
-                message.content("Error: AI response could not be generated.");
-                message
-              })
-              .await
-            {
-              error!("Error sending error message: {:?}", why);
-              // Debugging: Log the command, interaction token, and application ID
-              debug!(
-                "Debugging info: command: {:?}, interaction token: {:?}, application ID: {:?}",
-                command,
-                command.token,
-                ctx.http.application_id(),
-              );
-            }
+          Err(why) => {
+            error!("Error sending follow-up message: {:?}", why);
           }
-        }
-      } else {
-        // If the command is missing input text, send an error message
-        if let Err(why) = command
-          .create_interaction_response(&ctx.http, |response| {
-            response.kind(InteractionResponseType::ChannelMessageWithSource);
-            response.interaction_response_data(|message| {
-              message.content("Error: Command missing input text.");
-              message
-            })
-          })
-          .await
-        {
-          error!("Error sending error message: {:?}", why);
         }
       }
     }
+  }
+}
+
+fn truncate_chat_history(chat_history: &mut String, max_tokens: usize) {
+  let tokens: Vec<&str> = chat_history.unicode_words().collect();
+  let token_count = tokens.len();
+
+  debug!("Current chat history token count: {}", token_count);
+
+  if token_count > max_tokens {
+    let tokens_to_remove = token_count - max_tokens;
+    let new_history: String = tokens[tokens_to_remove..].join(" ");
+    *chat_history = new_history;
+    debug!(
+      "Chat history has been truncated by {} tokens",
+      tokens_to_remove
+    );
+  } else {
+    debug!("Chat history is within the token limit");
   }
 }
 
