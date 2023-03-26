@@ -8,10 +8,12 @@ use serenity::{
     id::{ChannelId, UserId},
     prelude::{
       command::{Command, CommandOptionType},
-      interaction::{Interaction, InteractionResponseType},
+      interaction::{
+        Interaction, InteractionResponseType,
+      },
     },
   },
-  prelude::*,
+  prelude::*
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -30,6 +32,7 @@ extern crate log;
 // Define a handler struct with a Mutex to store the chat history
 struct Handler {
   chat_histories: Arc<Mutex<HashMap<(UserId, ChannelId), String>>>,
+  chat_privacy: Arc<Mutex<HashMap<UserId, bool>>>,
   http: Arc<Http>,
 }
 
@@ -38,6 +41,7 @@ impl Handler {
   fn new(http: Arc<Http>) -> Self {
     Self {
       chat_histories: Arc::new(Mutex::new(HashMap::new())),
+      chat_privacy: Arc::new(Mutex::new(HashMap::new())),
       http,
     }
   }
@@ -58,15 +62,27 @@ impl EventHandler for Handler {
   // Event handler for when an interaction is created
   async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
     if let Interaction::ApplicationCommand(command) = interaction {
-      // Acknowledge the interaction
-      if let Err(_) = acknowledge_interaction(&command, &ctx).await {
-        return;
-      }
-
       let user_id = command.user.id;
       let channel_id = command.channel_id;
       let user_name = command.user.name.clone();
       let user_channel_key = (user_id, channel_id);
+      let is_private = *self
+        .chat_privacy
+        .lock()
+        .unwrap()
+        .get(&user_id)
+        .unwrap_or(&false);
+
+      let ephemeral = match command.data.name.as_str() {
+        "private" | "public" => true,
+        _ => is_private,
+      };
+
+      // Acknowledge the interaction
+      let interaction_data = match acknowledge_interaction(&command, &ctx, ephemeral).await {
+        Ok(data) => data,
+        Err(_) => return,
+      };
 
       match command.data.name.as_str() {
         "chat" => {
@@ -99,9 +115,17 @@ impl EventHandler for Handler {
           let ai_response =
             generate_ai_response(input, model, &api_key, user_channel_key, chat_history).await;
 
-          // Send the follow-up message
+          // Update the original message or send a follow-up message
           if let Some(response) = ai_response.clone() {
-            if let Err(_) = create_followup_message(&ctx, &command, response).await {
+            if let Err(_) = edit_original_message_or_create_followup(
+              &ctx,
+							&command,
+              &interaction_data,
+              response,
+              is_private,
+            )
+            .await
+            {
               return;
             }
           } else {
@@ -128,7 +152,6 @@ impl EventHandler for Handler {
             // debug!("Chat history after truncation:\n{}", history);
           }
         }
-
         "reset" => {
           // Remove the chat history for the user who called the command
           {
@@ -139,10 +162,32 @@ impl EventHandler for Handler {
           // Send a follow-up message to indicate the chat history has been reset
           let reset_message = "Chat history has been reset.".to_string();
 
-          if let Err(_) = create_followup_message(&ctx, &command, reset_message).await {
+          if let Err(_) = create_followup_message(&ctx, &command, reset_message, is_private).await {
             return;
           }
         }
+        "private" => {
+					set_chat_privacy(
+							&self.chat_privacy,
+							user_id,
+							true,
+							&ctx,
+							&command,
+							&interaction_data,
+					)
+					.await;
+			}
+			"public" => {
+					set_chat_privacy(
+							&self.chat_privacy,
+							user_id,
+							false,
+							&ctx,
+							&command,
+							&interaction_data,
+					)
+					.await;
+			}
         _ => {
           error!("Unknown command: {}", command.data.name);
         }
@@ -151,15 +196,93 @@ impl EventHandler for Handler {
   }
 }
 
+async fn edit_original_message_or_create_followup(
+	ctx: &Context,
+	command: &ApplicationCommandInteraction,
+	interaction_data: &InteractionData,
+	content: String,
+	chat_privacy: bool,
+) -> Result<(), ()> {
+	let interaction_id = &interaction_data.interaction_id;
+	let response_token = &interaction_data.response_token;
+
+	let message = if chat_privacy {
+			serde_json::json!({
+					"content": content,
+					"flags": 64
+			})
+	} else {
+			serde_json::json!({
+					"content": content
+			})
+	};
+
+	if let Ok(_) = ctx
+			.http
+			.edit_original_interaction_response(response_token, &message)
+			.await
+	{
+			debug!("Edited the original message");
+			return Ok(());
+	} else {
+			if let Err(why) = create_followup_message(ctx, command, content, chat_privacy).await {
+					error!("Error sending follow-up message: {:?}", why);
+					return Err(());
+			}
+			debug!("Sent a follow-up message");
+			return Ok(());
+	}
+}
+
+
+
+
+async fn set_chat_privacy(
+	chat_privacy_map: &Arc<Mutex<HashMap<UserId, bool>>>,
+	user_id: UserId,
+	chat_privacy: bool,
+	ctx: &Context,
+	command: &ApplicationCommandInteraction,
+	interaction_data: &InteractionData,
+) {
+	chat_privacy_map
+			.lock()
+			.unwrap()
+			.insert(user_id, chat_privacy);
+	let response = if chat_privacy {
+			"Chat privacy set to private.".to_string()
+	} else {
+			"Chat privacy set to public.".to_string()
+	};
+
+	if let Err(_) = edit_original_message_or_create_followup(
+			&ctx,
+			&command,
+			interaction_data,
+			response,
+			chat_privacy,
+	)
+	.await
+	{
+			return;
+	}
+}
+
+
 async fn create_followup_message(
   ctx: &Context,
   command: &ApplicationCommandInteraction,
   content: String,
+  chat_privacy: bool,
 ) -> Result<(), ()> {
   match command
     .create_followup_message(&ctx.http, |message| {
-      message.content(content);
-      message
+      if chat_privacy {
+        debug!("Chat privacy passed: {}", chat_privacy);
+        message.ephemeral(true).content(content)
+      } else {
+        message.content(content)
+      }
     })
     .await
   {
@@ -174,21 +297,36 @@ async fn create_followup_message(
   }
 }
 
+pub struct InteractionData {
+  pub interaction_id: String,
+  pub response_token: String,
+}
+
 async fn acknowledge_interaction(
   command: &ApplicationCommandInteraction,
   ctx: &Context,
-) -> Result<(), ()> {
+  ephemeral: bool,
+) -> Result<InteractionData, ()> {
   match timeout(
     Duration::from_millis(2500),
     command.create_interaction_response(&ctx.http, |response| {
-      response.kind(InteractionResponseType::DeferredChannelMessageWithSource)
+      if ephemeral {
+        response
+          .kind(InteractionResponseType::ChannelMessageWithSource)
+          .interaction_response_data(|message| message.ephemeral(true).content("Processing..."))
+      } else {
+        response.kind(InteractionResponseType::DeferredChannelMessageWithSource)
+      }
     }),
   )
   .await
   {
     Ok(Ok(_)) => {
       debug!("Acknowledged the interaction");
-      Ok(())
+      Ok(InteractionData {
+        interaction_id: command.id.to_string(),
+        response_token: command.token.clone(),
+      })
     }
     Ok(Err(why)) => {
       error!("Error acknowledging interaction: {:?}", why);
@@ -339,12 +477,14 @@ async fn register_application_commands(http: &Http) -> Result<(), Box<dyn std::e
 
   // Define the commands to register, along with their name, description, and options
   let commands_to_register = vec![
-    ("chat", "Your message to the AI", Some(CommandOptionType::String)),
     (
-      "reset",
-      "Reset the chat history",
-      None,
+      "chat",
+      "Your message to the AI",
+      Some(CommandOptionType::String),
     ),
+    ("reset", "Reset the chat history", None),
+    ("private", "Set the chat privacy to private", None),
+    ("public", "Set the chat privacy to public", None),
   ];
 
   // Check if the commands already exist
@@ -353,20 +493,20 @@ async fn register_application_commands(http: &Http) -> Result<(), Box<dyn std::e
 
     // If the command doesn't exist, create it and add it as a global command
     if !command_exists {
-			let command_result = Command::create_global_application_command(http, |command| {
-					command.name(name).description(description);
-					if let Some(options) = option_type {
-							command.create_option(|option| {
-									option
-											.name(name)
-											.description(description)
-											.kind(options)
-											.required(true)
-							});
-					}
-					command
-			})
-			.await;
+      let command_result = Command::create_global_application_command(http, |command| {
+        command.name(name).description(description);
+        if let Some(options) = option_type {
+          command.create_option(|option| {
+            option
+              .name(name)
+              .description(description)
+              .kind(options)
+              .required(true)
+          });
+        }
+        command
+      })
+      .await;
 
       // Log the result of registering the command
       match command_result {
