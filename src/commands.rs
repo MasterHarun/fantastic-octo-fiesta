@@ -1,3 +1,11 @@
+//! Define `Handler` struct and implement the `EventHandler` trait for it
+//!
+//! ## Interaction handling
+//!
+//! Implement the `interaction_create` method to handle incoming interactions
+//! and delegate command handling to the appropriate functions from the `commands` module.
+//!
+
 use std::{sync::{Arc, Mutex}, collections::HashMap};
 
 use serenity::{
@@ -9,9 +17,21 @@ use serenity::{
     },
 };
 
-use crate::{structures::InteractionData};
+use crate::structures::InteractionData;
 use crate::utils::*;
 
+/// Handles the `/chat` command
+///
+/// Generates an AI response based on the user's input and sends it as a follow-up message.
+///
+/// # Arguments
+///
+/// * `chat_histories` - The current chat history for the user and channel
+/// * `ctx` - The Serenity Context for the command
+/// * `command` - The ApplicationCommandInteraction data
+/// * `is_private` - A boolean representing whether the chat is private or public
+/// * `interaction_data` - The InteractionData containing interaction ID and token
+/// 
 pub async fn chat_command(
   chat_histories: &Arc<Mutex<HashMap<(UserId, ChannelId), String>>>,
   ctx: &Context,
@@ -32,13 +52,11 @@ pub async fn chat_command(
 	let user_channel_key = (user_id, channel_id);
 	let user_name = command.user.name.clone();
 
-  // Log the user's input with their name and ID
   info!(
     "User {}#{}: {}",
     user_name, command.user.discriminator, input
   );
 
-  // Generate AI response here
   let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not found");
   let model = "gpt-3.5-turbo";
 
@@ -53,7 +71,6 @@ pub async fn chat_command(
   let ai_response =
     generate_ai_response(input, model, &api_key, user_channel_key, chat_history).await;
 
-  // Update the original message or send a follow-up message
   if let Some(response) = ai_response.clone() {
     if let Err(_) = edit_original_message_or_create_followup(
       ctx,
@@ -91,6 +108,15 @@ pub async fn chat_command(
   }
 }
 
+/// Resets the chat history for the user and channel.
+///
+/// # Arguments
+///
+/// * `chat_histories` - A mutable reference to the chat history to be reset.
+/// * `ctx` - The `Context` for accessing the Discord API.
+/// * `command` - The `ApplicationCommandInteraction` that triggered the reset command.
+/// * `is_private` - A boolean representing whether the chat is private or public
+///
 pub async fn reset_command(
   chat_histories: &Arc<Mutex<HashMap<(UserId, ChannelId), String>>>,
   ctx: &Context,
@@ -106,7 +132,6 @@ pub async fn reset_command(
     chat_histories.remove(&(user_id, channel_id));
   }
 
-  // Send a follow-up message to indicate the chat history has been reset
   let reset_message = "Chat history has been reset.".to_string();
 
   if let Err(_) = create_followup_message(&ctx, &command, reset_message, is_private).await {
@@ -114,16 +139,25 @@ pub async fn reset_command(
   }
 }
 
+/// Handles the `/private` command
+///
+/// Sets the user's chat privacy to private, making the AI responses ephemeral.
+///
+/// # Arguments
+///
+/// * `chat_privacy` - The Arc<Mutex<HashMap<UserId, bool>>> containing chat privacy settings
+/// * `ctx` - The Serenity Context for the command
+/// * `command` - The ApplicationCommandInteraction data
+/// * `interaction_data` - The InteractionData containing interaction ID and token
+/// 
 pub async fn private_command(
   chat_privacy: &Arc<Mutex<HashMap<UserId, bool>>>,
   ctx: &Context,
   command: &ApplicationCommandInteraction,
 	interaction_data: &InteractionData,
 ) {
-	let user_id = command.user.id;
   set_chat_privacy(
     &chat_privacy,
-    user_id,
     true,
     &ctx,
     &command,
@@ -132,16 +166,25 @@ pub async fn private_command(
   .await;
 }
 
+/// Handles the `/public` command
+///
+/// Sets the user's chat privacy to public, making the AI responses visible to everyone.
+///
+/// # Arguments
+///
+/// * `chat_privacy` - The Arc<Mutex<HashMap<UserId, bool>>> containing chat privacy settings
+/// * `ctx` - The Serenity Context for the command
+/// * `command` - The ApplicationCommandInteraction data
+/// * `interaction_data` - The InteractionData containing interaction ID and token
+/// 
 pub async fn public_command(
   chat_privacy: &Arc<Mutex<HashMap<UserId, bool>>>,
   ctx: &Context,
   command: &ApplicationCommandInteraction,
 	interaction_data: &InteractionData
 ) {
-	let user_id = command.user.id;
   set_chat_privacy(
     chat_privacy,
-    user_id,
     false,
     &ctx,
     &command,

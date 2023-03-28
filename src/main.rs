@@ -1,14 +1,18 @@
-use sensible_env_logger::try_init_custom_env_and_builder;
-use std::{env, sync::{Arc}};
+  //! Entry point of the application
+  //!
+  //! - Set up the Discord client and event handlers
+  //! - Register application commands
+  //!
 
-use serenity::{
-    http::Http, prelude::GatewayIntents,
-};
+use sensible_env_logger::try_init_custom_env_and_builder;
+use std::{env, sync::Arc};
+
+use serenity::{http::Http, prelude::GatewayIntents};
 
 mod commands;
 mod handlers;
-mod utils;
 mod structures;
+mod utils;
 
 use dotenvy::dotenv;
 
@@ -21,9 +25,10 @@ extern crate log;
 
 #[tokio::main]
 async fn main() {
+
   dotenv().ok();
   info!("running");
-  // Get env vars
+
   let token = env::var("DISCORD_TOKEN").expect("DISCORD_TOKEN not found");
   let application_id =
     env::var("DISCORD_APPLICATION_ID").expect("DISCORD_APPLICATION_ID not found");
@@ -37,10 +42,8 @@ async fn main() {
     sensible_env_logger::pretty::formatted_timed_builder,
   );
 
-  // Set the gateway intents to receive guild messages and message content
   let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 
-  // Create an HTTP client and Discord bot client
   let http = Arc::new(Http::new_with_application_id(
     &token,
     application_id.parse::<u64>().unwrap(),
@@ -51,7 +54,6 @@ async fn main() {
     .await
     .expect("Error creating client");
 
-  // Start the Discord bot client and log any errors
   if let Err(why) = client.start().await {
     error!("Client error: {:?}", why);
   }

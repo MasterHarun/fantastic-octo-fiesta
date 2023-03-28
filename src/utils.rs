@@ -1,3 +1,16 @@
+//! Contains utility functions to support the main functionality of the bot
+//!
+//! ## Utility functions
+//!
+//! - `register_application_commands`: Registers application commands with Discord
+//! - `generate_ai_response`: Generates an AI response using the OpenAI API
+//! - `truncate_chat_history`: Truncates chat history to a specified number of tokens
+//! - `acknowledge_interaction`: Acknowledges an interaction with Discord
+//! - `create_followup_message`: Sends a follow-up message for an interaction
+//! - `edit_original_message_or_create_followup`: Edits the original interaction message or creates a follow-up message
+//! - `set_chat_privacy`: Sets chat privacy for a user
+//!
+
 use serde_json::json;
 use serenity::{model::prelude::{interaction::{application_command::ApplicationCommandInteraction, InteractionResponseType}, UserId, ChannelId, command::{CommandOptionType, Command}}, prelude::Context, http::Http};
 use tokio::time::{timeout, Duration};
@@ -7,6 +20,15 @@ use std::{collections::HashMap};
 
 use crate::structures::*;
 
+/// Creates a follow-up message in response to an application command (slash command).
+///
+/// # Arguments
+///
+/// * `ctx` - The `Context` for accessing the Discord API.
+/// * `command` - The `ApplicationCommandInteraction` that triggered the follow-up message.
+/// * `content` - The content of the follow-up message.
+/// * `chat_privacy` - A boolean representing the privacy setting of the message.
+///
 pub async fn create_followup_message(
   ctx: &Context,
   command: &ApplicationCommandInteraction,
@@ -35,17 +57,29 @@ pub async fn create_followup_message(
   }
 }
 
+/// Edits the original message or creates a follow-up message
+///
+/// Edits the original interaction response message or creates a new follow-up message with the specified content.
+///
+/// # Arguments
+///
+/// * `ctx` - The Serenity Context
+/// * `command` - The ApplicationCommandInteraction data
+/// * `interaction_data` - The InteractionData containing interaction ID and token
+/// * `content` - The content of the message
+/// * `is_private` - A boolean representing whether the chat is private or public
+/// 
 pub async fn edit_original_message_or_create_followup(
 	ctx: &Context,
 	command: &ApplicationCommandInteraction,
 	interaction_data: &InteractionData,
 	content: String,
-	chat_privacy: bool,
+	is_private: bool,
 ) -> Result<(), ()> {
 	let _interaction_id = &interaction_data.interaction_id;
 	let response_token = &interaction_data.response_token;
 
-	let message = if chat_privacy {
+	let message = if is_private {
 			serde_json::json!({
 					"content": content,
 					"flags": 64
@@ -64,7 +98,7 @@ pub async fn edit_original_message_or_create_followup(
 			debug!("Edited the original message");
 			return Ok(());
 	} else {
-			if let Err(why) = create_followup_message(ctx, command, content, chat_privacy).await {
+			if let Err(why) = create_followup_message(ctx, command, content, is_private).await {
 					error!("Error sending follow-up message: {:?}", why);
 					return Err(());
 			}
@@ -73,7 +107,16 @@ pub async fn edit_original_message_or_create_followup(
 	}
 }
 
-
+/// Acknowledges an interaction
+///
+/// Sends an acknowledgement response to the interaction and returns the interaction data.
+///
+/// # Arguments
+///
+/// * `command` - The ApplicationCommandInteraction data
+/// * `ctx` - The Serenity Context for the command
+/// * `ephemeral` - A boolean indicating whether the acknowledgement message should be ephemeral
+/// 
 pub async fn acknowledge_interaction(
   command: &ApplicationCommandInteraction,
   ctx: &Context,
@@ -111,6 +154,14 @@ pub async fn acknowledge_interaction(
   }
 }
 
+/// Truncates the chat history to fit within the character limit imposed by the OpenAI API.
+///
+/// # Arguments
+///
+/// * `chat_history` - The current chat history as a String.
+/// * `input` - The user's input that will be added to the chat history.
+/// * `max_length` - The maximum allowed length of the chat history, including the user's input.
+///
 pub fn truncate_chat_history(chat_history: &mut String, max_tokens: usize) {
   let tokens: Vec<&str> = chat_history.unicode_words().collect();
   let token_count = tokens.len();
@@ -130,14 +181,26 @@ pub fn truncate_chat_history(chat_history: &mut String, max_tokens: usize) {
   }
 }
 
-pub(crate) async fn set_chat_privacy(
+/// Sets chat privacy for a user
+///
+/// Updates the chat privacy settings for a user and sends a follow-up message to indicate the change.
+///
+/// # Arguments
+///
+/// * `chat_privacy_map` - The Arc<Mutex<HashMap<UserId, bool>>> containing chat privacy settings
+/// * `chat_privacy` - A boolean representing the new chat privacy setting
+/// * `ctx` - The Serenity Context for the command
+/// * `command` - The ApplicationCommandInteraction data
+/// * `interaction_data` - The InteractionData containing interaction ID and token
+/// 
+pub async fn set_chat_privacy(
 	chat_privacy_map: &Arc<Mutex<HashMap<UserId, bool>>>,
-	user_id: UserId,
 	chat_privacy: bool,
 	ctx: &Context,
 	command: &ApplicationCommandInteraction,
 	interaction_data: &InteractionData,
 ) {
+	let user_id = command.user.id;
 	chat_privacy_map
 			.lock()
 			.unwrap()
@@ -162,7 +225,16 @@ pub(crate) async fn set_chat_privacy(
 }
 
 
-// Generate an AI response based on the given input and chat history
+/// Generates an AI response using the OpenAI API based on the user input and chat history.
+///
+/// # Arguments
+///
+/// * `input` - The user's input to be processed by the AI.
+/// * `model` - The OpenAI model to be used for generating the response.
+/// * `api_key` - The OpenAI API key for authentication.
+/// * `user_channel_key` - A tuple representing the user and channel IDs.
+/// * `chat_history` - The chat history to be used as context for generating the AI response.
+///
 pub async fn generate_ai_response(
   prompt: &str,
   model: &str,
@@ -170,15 +242,12 @@ pub async fn generate_ai_response(
   _user_channel_key: (UserId, ChannelId),
   chat_history: String,
 ) -> Option<String> {
-  // Create a client for the OpenAI API
   let client = reqwest::Client::new();
 
-  // Set the API URL
   let url = format!("https://api.openai.com/v1/chat/completions");
 
   let last_message_id = chat_history;
 
-  // Set the parameters for the API call
   let params = json!({
     "model": model,
     "messages": [{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": &last_message_id}, {"role": "user", "content": prompt}],
@@ -188,7 +257,6 @@ pub async fn generate_ai_response(
     // "stop": ["/n"]
   });
 
-  // Send the API request and get the response
   let response = client
     .post(url)
     .header("Authorization", format!("Bearer {}", api_key))
@@ -245,26 +313,25 @@ pub async fn generate_ai_response(
           .await
           .unwrap_or_else(|_| "Failed to read response text".to_string());
         debug!("API request failed with response: {}", response_text);
-        // Return None since the request failed
         None
       }
     }
     Err(err) => {
-      // If there was an error sending the API request, print the error for debugging purposes
       error!("Error sending API request: {:?}", err);
-      // Return None since the request could not be sent
       None
     }
   }
 }
 
-
-// Registers the application commands that the Discord bot can receive.
+/// Registers the application commands (slash commands) with Discord.
+///
+/// # Arguments
+///
+/// * `http` - A reference to the `Http` instance for making requests to Discord API.
+///
 pub async fn register_application_commands(http: &Http) -> Result<(), Box<dyn std::error::Error>> {
-  // Get the existing gloval application commands
   let commands = http.get_global_application_commands().await?;
 
-  // Define the commands to register, along with their name, description, and options
   let commands_to_register = vec![
     (
       "chat",
@@ -280,7 +347,6 @@ pub async fn register_application_commands(http: &Http) -> Result<(), Box<dyn st
   for (name, description, option_type) in commands_to_register {
     let command_exists = commands.iter().any(|c| c.name == *name);
 
-    // If the command doesn't exist, create it and add it as a global command
     if !command_exists {
       let command_result = Command::create_global_application_command(http, |command| {
         command.name(name).description(description);
@@ -297,7 +363,6 @@ pub async fn register_application_commands(http: &Http) -> Result<(), Box<dyn st
       })
       .await;
 
-      // Log the result of registering the command
       match command_result {
         Ok(command) => {
           debug!("Successfully registered application command: {:?}", command);
@@ -311,7 +376,6 @@ pub async fn register_application_commands(http: &Http) -> Result<(), Box<dyn st
     }
   }
 
-  // Log the list of registered commands
   debug!(
     "Successfully registered application commands: {:#?}",
     commands
