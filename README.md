@@ -9,6 +9,7 @@ A Discord account and [Discord Developer Portal](https://discord.com/developers/
 [OpenAI](https://beta.openai.com/signup/) account for API access.
 
 ## **Setup**
+---
 Follow the steps below to set up the bot:
 
 ### **1**. **Create a new Discord application**
@@ -31,28 +32,51 @@ Click the "Save Changes" button.
 ### **2**. **Clone the repository and install dependencies**
 Copy code:
 ```sh
-git clone https://github.com/MasterHarun/RustGPT.git
-cd RustGPT
+git clone https://github.com/MasterHarun/rustgpt-discord.git
+cd rustgpt-discord
 ```
 
 ### **3**. **Set up environment variables**
-Create a .env file in the root directory of the project and add the following environment variables:
+Create a `.env` file in the root directory of the project and set the necessary environment variable. Alternatively, you can set these variables directly in your system or pass them as command-line flags when running the bot.
 
-Copy code:
+- #### **Using a `.env` file**
+
 ```sh
 DISCORD_TOKEN=<your_discord_bot_token>
-DISCORD_APPLICATION_ID=<your_discord_application_id>
+DISCORD_APP_ID=<your_discord_app_id>
 OPENAI_API_KEY=<your_openAI_api_key>
 ```
 
-Replace `<your_discord_bot_token>` with the bot token you copied earlier, and `<your_openAI_api_key>` with your OpenAI API key.
+- #### **Using Command-line flags** 
+```sh
+./rustgpt-discord --token your_token --discord-app-id your_app_id --openai-api-key your_openai_api_key
+```
 
-### **4**. **Build and run the bot**
-In the root directory of the project, run the following commands:
+- #### **Using Env vars**
+```sh
+export DISCORD_TOKEN=your_token
+export DISCORD_APP_ID=your_app_id
+export OPENAI_API_KEY=your_openai_key
+```
+
+>Replace `<your_discord_bot_token>` with the bot token you copied earlier, and `<your_openAI_api_key>` with your OpenAI API key.
+
+### **4**. **Building and Running the Binary**
+To build the binary, run the following command in the project root:
 
 ```sh
-cargo build
-cargo run
+cargo build --release
+```
+
+The binary will be created in the target/release folder. To run the binary, navigate to the target/release folder and execute the binary:
+```sh
+cd target/release
+./rustgpt-discord
+```
+If you want to use command-line flags, provide them when running the binary:
+
+```sh
+./rustgpt-discord --token your_token --discord-app-id your_app_id --openai-api-key your_openai_api_key
 ```
 The bot should now be running, and it will display a "Connected" message in the terminal.
 
@@ -66,6 +90,7 @@ Open the URL in a new browser tab, and follow the prompts to invite the bot to y
 The bot should now appear in your server, and you can start using its commands and features.
 
 ## **Commands**
+---
 Here is a list of available commands:
 
 **/chat**: Chat with the AI using OpenAI's GPT.
@@ -77,11 +102,13 @@ Here is a list of available commands:
 **/public**: Set chat privacy mode to "Public," making the AI responses visible to all server members.
 
 ## **Features**
+---
 AI chat integration using OpenAI's GPT.
 Chat privacy settings allowing for private or public AI responses.
 Extensible command system for adding new commands easily.
 
 ## **Contributing**
+---
 Contributions are welcome! If you'd like to contribute, please follow these steps:
 
 Fork the repository.
