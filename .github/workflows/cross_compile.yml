@@ -1,0 +1,75 @@
+name: Cross-Compile
+
+on:
+  workflow_run:
+    workflows:
+      - "Update Cargo Version"
+    types:
+      - completed
+
+jobs:
+  cross_compile:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Get version from Cargo.toml
+      run: |
+        VERSION=$(grep -E '^version' Cargo.toml | head -1 | awk -F'\"' '{print $2}')
+        echo "RELEASE_VERSION=v$VERSION" >> $GITHUB_ENV
+
+    - name: Check if version has changed
+      run: |
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        if [ "$LATEST_TAG" == "${{ env.RELEASE_VERSION }}" ]; then
+          echo "Version has not changed. Skipping build."
+          exit 78
+        fi
+
+    - name: Install Rust
+      uses: actions-rs/toolchain@v1
+      with:
+        profile: minimal
+        toolchain: stable
+        override: true
+
+    - name: Install cross
+      run: cargo install cross
+
+    - name: Cross-compile for multiple architectures
+      run: |
+        TARGETS="\
+        x86_64-unknown-linux-gnu \
+        x86_64-pc-windows-gnu \
+        arm-unknown-linux-gnueabihf \
+        armv7-unknown-linux-gnueabihf \
+        aarch64-unknown-linux-gnu \
+        "
+        for target in $TARGETS; do
+          echo "Building for target: $target"
+          cross build --target $target --release || exit 1
+        done
+
+    - name: Create GitHub Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ env.RELEASE_VERSION }}
+        release_name: Release ${{ env.RELEASE_VERSION }}
+        draft: false
+        prerelease: false
+
+    - name: Upload release assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./target/${{ matrix.target }}/release/rustgpt-discord
+        asset_name: rustgpt-discord-${{ matrix.target }}
+        asset_content_type: application/octet-stream

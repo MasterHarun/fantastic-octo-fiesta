@@ -1,0 +1,46 @@
+name: Update Cargo Version
+
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  update_cargo_version:
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'master'
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+      with:
+        ref: master
+        fetch-depth: 0
+
+    - name: Get current version from Cargo.toml
+      run: |
+        VERSION=$(grep -E '^version' Cargo.toml | head -1 | awk -F'\"' '{print $2}')
+        echo "CURRENT_VERSION=$VERSION" >> $GITHUB_ENV
+
+    - name: Get major and minor version from Cargo.toml
+      run: |
+        MAJOR_MINOR_VERSION=$(echo ${{ env.CURRENT_VERSION }} | cut -d. -f1-2)
+        echo "MAJOR_MINOR_VERSION=$MAJOR_MINOR_VERSION" >> $GITHUB_ENV
+
+    - name: Calculate patch version from git commit count
+      run: |
+        PATCH_VERSION=$(git rev-list --count HEAD)
+        echo "PATCH_VERSION=$PATCH_VERSION" >> $GITHUB_ENV
+
+    - name: Update Cargo.toml with new version
+      run: |
+        NEW_VERSION="${{ env.MAJOR_MINOR_VERSION }}.${{ env.PATCH_VERSION }}"
+        sed -i "s/^version *= *\"${{ env.CURRENT_VERSION }}\"/version = \"$NEW_VERSION\"/" Cargo.toml
+
+    - name: Commit updated Cargo.toml
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add Cargo.toml
+        git commit -m "Update Cargo.toml version to ${{ env.MAJOR_MINOR_VERSION }}.${{ env.PATCH_VERSION }}" || echo "No changes to commit"
+        git push
