@@ -1,0 +1,55 @@
+name: Upload Assets
+
+on:
+  workflow_run:
+    workflows: ["Cross-Compile"]
+    types:
+      - completed
+  workflow_dispatch:
+
+jobs:
+  upload_assets:
+    if: (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target:
+          - x86_64-unknown-linux-gnu
+          - x86_64-pc-windows-gnu
+          - arm-unknown-linux-gnueabihf
+          - armv7-unknown-linux-gnueabihf
+          - aarch64-unknown-linux-gnu
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v2
+
+    - name: Get latest release tag
+      id: get_latest_release
+      run: |
+        LATEST_TAG=$(curl --silent "https://api.github.com/repos/${{ github.repository }}/releases/latest" | jq -r .tag_name)
+        echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
+
+    - name: Download artifacts
+      uses: actions/download-artifact@v2
+      with:
+        name: rustgpt-discord-${{ matrix.target }}
+        path: ./target/${{ matrix.target }}/release/
+
+    - name: Upload Windows release asset
+      if: matrix.target == 'x86_64-pc-windows-gnu'
+      uses: svenstaro/upload-release-action@2.2.1
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: ./target/${{ matrix.target }}/release/rustgpt-discord.exe
+        asset_name: rustgpt-discord-${{ matrix.target }}.exe
+        tag: ${{ env.LATEST_TAG }}
+
+    - name: Upload non-Windows release asset
+      if: matrix.target != 'x86_64-pc-windows-gnu'
+      uses: svenstaro/upload-release-action@2.2.1
+      with:
+        repo_token: ${{ secrets.GITHUB_TOKEN }}
+        file: ./target/${{ matrix.target }}/release/rustgpt-discord
+        asset_name: rustgpt-discord-${{ matrix.target }}
+        tag: ${{ env.LATEST_TAG }}
