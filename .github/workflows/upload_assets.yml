@@ -31,8 +31,10 @@ jobs:
         echo "LATEST_TAG=$LATEST_TAG" >> $GITHUB_ENV
 
     - name: Download artifacts
-      uses: actions/download-artifact@v2
+      uses: dawidd6/action-download-artifact@v2
       with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        workflow: cross_compile.yml
         name: rustgpt-discord-${{ matrix.target }}
         path: ./target/${{ matrix.target }}/release/
 
