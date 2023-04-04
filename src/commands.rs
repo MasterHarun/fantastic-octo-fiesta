@@ -38,6 +38,7 @@ pub async fn chat_command(
   command: &ApplicationCommandInteraction,
   is_private: bool,
 	interaction_data: &InteractionData,
+	api_key: &String,
 ) {
   let input = command
     .data
@@ -57,7 +58,6 @@ pub async fn chat_command(
     user_name, command.user.discriminator, input
   );
 
-  let api_key = std::env::var("OPENAI_API_KEY").expect("OPENAI_API_KEY not found");
   let model = "gpt-3.5-turbo";
 
   let chat_history = {
@@ -67,7 +67,7 @@ pub async fn chat_command(
       .or_insert_with(String::new)
       .clone()
   };
-
+	
   let ai_response =
     generate_ai_response(input, model, &api_key, user_channel_key, chat_history).await;
 

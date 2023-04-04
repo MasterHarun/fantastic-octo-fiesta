@@ -9,6 +9,7 @@
 //! - `create_followup_message`: Sends a follow-up message for an interaction
 //! - `edit_original_message_or_create_followup`: Edits the original interaction message or creates a follow-up message
 //! - `set_chat_privacy`: Sets chat privacy for a user
+//! - `get_env_var`: Gets the environment variables from various sources.
 //!
 
 use serde_json::json;
@@ -382,4 +383,47 @@ pub async fn register_application_commands(http: &Http) -> Result<(), Box<dyn st
   );
 
   Ok(())
+}
+
+/// Retrieves the value of an environment variable or command-line argument.
+///
+/// This function will first check if the specified command-line argument is provided.
+/// If not, it will look for the environment variable with the given name. Lastely it 
+/// will look to see if a '.env' file exists. If neither options is found, an error 
+/// message will be displayed, and the program will exit.
+///
+/// # Arguments
+///
+/// * `var_name` - The name of the environment variable to search for.
+/// * `cmd_arg` - The name of the command-line argument to search for.
+/// * `matches` - An optional reference to the `clap::ArgMatches` object containing the parsed command-line arguments.
+///
+/// # Example
+///
+/// ```
+/// let api_key = get_env_var_or_arg("OPENAI_API_KEY", "openai_api_key", Some(&matches));
+/// let api_key = get_env_var_or_arg("OPENAI_API_KEY", "openai_api_key", None);a
+/// ```
+///
+/// # Panics
+///
+/// This function will panic if neither the command-line argument nor the environment variable is found.
+///
+/// # Returns
+///
+/// A `String` containing the value of the specified command-line argument or environment variable.
+pub fn get_env_var(var_name: &str, cmd_arg: &str, matches: Option<&clap::ArgMatches>, ) -> String {
+	if let Some(matches) = matches {
+		if let Some(value) = matches.get_one::<String>(cmd_arg) {
+			return value.to_string();
+		} 	
+	} 
+	if let Ok(value) = std::env::var(var_name) {
+		return value;
+	} else if let Ok(value) = dotenvy::var(var_name) {
+		return value;
+	} else {
+		eprintln!("{} not found in command-line arguments, environment variables, or the dotenv file. Please set it up properly.", var_name);
+    std::process::exit(1);
+	}
 }

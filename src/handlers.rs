@@ -21,20 +21,21 @@ use serenity::{
 };
 
 use crate::commands::*;
+use crate::structures::Config;
 use crate::utils::{acknowledge_interaction, register_application_commands};
 
 pub struct Handler {
   chat_histories: Arc<Mutex<HashMap<(UserId, ChannelId), String>>>,
   chat_privacy: Arc<Mutex<HashMap<UserId, bool>>>,
-  http: Arc<Http>,
+	config: Arc<Config>,
 }
 
 impl Handler {
-  pub fn new(http: Arc<Http>) -> Self {
+  pub fn new(config: Arc<Config>) -> Self {
     Self {
       chat_histories: Arc::new(Mutex::new(HashMap::new())),
       chat_privacy: Arc::new(Mutex::new(HashMap::new())),
-      http,
+			config,
     }
   }
 }
@@ -43,8 +44,11 @@ impl Handler {
 impl EventHandler for Handler {
   async fn ready(&self, _: Context, ready: Ready) {
     info!("{} is connected!", ready.user.name);
-
-    if let Err(e) = register_application_commands(&self.http).await {
+		let http = Arc::new(Http::new_with_application_id(
+			&self.config.discord_token,
+			self.config.app_id.parse::<u64>().unwrap(),
+		));
+    if let Err(e) = register_application_commands(&http).await {
       error!("Error registering application commands: {:?}", e);
     }
   }
@@ -86,6 +90,7 @@ impl EventHandler for Handler {
             &command,
             is_private,
             &interaction_data,
+						&self.config.api_key,
           )
           .await
         }
