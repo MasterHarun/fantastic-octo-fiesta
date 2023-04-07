@@ -2,4 +2,4 @@
 .env
 Cargo.lock
 .rustfmt.toml
-old_monolith_file.rs
+clippy.toml

@@ -15,14 +15,14 @@
 use serde_json::json;
 use serenity::{model::prelude::{interaction::{application_command::ApplicationCommandInteraction, InteractionResponseType}, UserId, ChannelId, command::{CommandOptionType, Command}}, prelude::Context, http::Http};
 use tokio::time::{timeout, Duration};
-use unicode_segmentation::UnicodeSegmentation;
 use std::sync::{Arc, Mutex};
-use std::{collections::HashMap};
+use rustc_hash::FxHashMap;
 
-use crate::structures::*;
+use crate::{structures::*, handlers::{Handler, HandlerStruct}};
 
 /// Creates a follow-up message in response to an application command (slash command).
-///
+/// This function checks the chat privacy setting for the user and sends an ephemeral message if the setting is enabled.
+/// 
 /// # Arguments
 ///
 /// * `ctx` - The `Context` for accessing the Discord API.
@@ -30,12 +30,22 @@ use crate::structures::*;
 /// * `content` - The content of the follow-up message.
 /// * `chat_privacy` - A boolean representing the privacy setting of the message.
 ///
+/// # Returns
+/// 
+/// * `Result<(), ()>` - A `Result` containing the result of the operation.
+/// 
+/// # Errors
+/// 
+/// * `()` - An error occurred while sending the follow-up message.
+/// 
+/// # Examples
 pub async fn create_followup_message(
   ctx: &Context,
   command: &ApplicationCommandInteraction,
   content: String,
   chat_privacy: bool,
 ) -> Result<(), ()> {
+
   match command
     .create_followup_message(&ctx.http, |message| {
       if chat_privacy {
@@ -69,7 +79,7 @@ pub async fn create_followup_message(
 /// * `interaction_data` - The InteractionData containing interaction ID and token
 /// * `content` - The content of the message
 /// * `is_private` - A boolean representing whether the chat is private or public
-/// 
+/// todo: review this function
 pub async fn edit_original_message_or_create_followup(
 	ctx: &Context,
 	command: &ApplicationCommandInteraction,
@@ -91,24 +101,24 @@ pub async fn edit_original_message_or_create_followup(
 			})
 	};
 
-	if let Ok(_) = ctx
+	if (ctx
 			.http
 			.edit_original_interaction_response(response_token, &message)
-			.await
+			.await).is_ok()
 	{
 			debug!("Edited the original message");
-			return Ok(());
+			Ok(())
 	} else {
 			if let Err(why) = create_followup_message(ctx, command, content, is_private).await {
 					error!("Error sending follow-up message: {:?}", why);
 					return Err(());
 			}
 			debug!("Sent a follow-up message");
-			return Ok(());
+			Ok(())
 	}
 }
 
-/// Acknowledges an interaction
+// / Acknowledges an interaction
 ///
 /// Sends an acknowledgement response to the interaction and returns the interaction data.
 ///
@@ -163,24 +173,24 @@ pub async fn acknowledge_interaction(
 /// * `input` - The user's input that will be added to the chat history.
 /// * `max_length` - The maximum allowed length of the chat history, including the user's input.
 ///
-pub fn truncate_chat_history(chat_history: &mut String, max_tokens: usize) {
-  let tokens: Vec<&str> = chat_history.unicode_words().collect();
-  let token_count = tokens.len();
+// pub fn truncate_chat_history(chat_history: &mut String, max_tokens: usize) {
+//   let tokens: Vec<&str> = chat_history.unicode_words().collect();
+//   let token_count = tokens.len();
 
-  debug!("Current chat history token count: {}", token_count);
+//   debug!("Current chat history token count: {}", token_count);
 
-  if token_count > max_tokens {
-    let tokens_to_remove = token_count - max_tokens;
-    let new_history: String = tokens[tokens_to_remove..].join(" ");
-    *chat_history = new_history;
-    debug!(
-      "Chat history has been truncated by {} tokens",
-      tokens_to_remove
-    );
-  } else {
-    debug!("Chat history is within the token limit");
-  }
-}
+//   if token_count > max_tokens {
+//     let tokens_to_remove = token_count - max_tokens;
+//     let new_history: String = tokens[tokens_to_remove..].join(" ");
+//     *chat_history = new_history;
+//     debug!(
+//       "Chat history has been truncated by {} tokens",
+//       tokens_to_remove
+//     );
+//   } else {
+//     debug!("Chat history is within the token limit");
+//   }
+// }
 
 /// Sets chat privacy for a user
 ///
@@ -195,7 +205,7 @@ pub fn truncate_chat_history(chat_history: &mut String, max_tokens: usize) {
 /// * `interaction_data` - The InteractionData containing interaction ID and token
 /// 
 pub async fn set_chat_privacy(
-	chat_privacy_map: &Arc<Mutex<HashMap<UserId, bool>>>,
+	chat_privacy_map: &Arc<Mutex<FxHashMap<UserId, bool>>>,
 	chat_privacy: bool,
 	ctx: &Context,
 	command: &ApplicationCommandInteraction,
@@ -212,17 +222,18 @@ pub async fn set_chat_privacy(
 			"Chat privacy set to public.".to_string()
 	};
 
-	if let Err(_) = edit_original_message_or_create_followup(
-			&ctx,
-			&command,
+	if (edit_original_message_or_create_followup(
+			ctx,
+			command,
 			interaction_data,
 			response,
 			chat_privacy,
 	)
-	.await
+	.await).is_err()
 	{
-			return;
+			error!("Error setting chat privacy");
 	}
+
 }
 
 
@@ -236,22 +247,29 @@ pub async fn set_chat_privacy(
 /// * `user_channel_key` - A tuple representing the user and channel IDs.
 /// * `chat_history` - The chat history to be used as context for generating the AI response.
 ///
+/// # Returns
+/// 
+/// * `ApiResponse` - The AI response as an ApiResponse struct.
 pub async fn generate_ai_response(
+	handler: &HandlerStruct,
   prompt: &str,
-  model: &str,
-  api_key: &str,
-  _user_channel_key: (UserId, ChannelId),
-  chat_history: String,
-) -> Option<String> {
+	user_channel_key: (UserId, ChannelId)
+) -> Result<ApiResponseStruct, ()> {
   let client = reqwest::Client::new();
+	let chat_history: String = handler.get_chat_history(user_channel_key);
 
-  let url = format!("https://api.openai.com/v1/chat/completions");
+	let config = handler.get_config();
+  let model = "gpt-3.5-turbo";
+  let url = "https://api.openai.com/v1/chat/completions".to_string();
 
-  let last_message_id = chat_history;
-
+  // let last_message_id = chat_history;
+	// todo - change system content based on personality
   let params = json!({
     "model": model,
-    "messages": [{"role": "system", "content": "You are a helpful assistant."}, {"role": "user", "content": &last_message_id}, {"role": "user", "content": prompt}],
+    "messages": [
+			{"role": "system", "content": "You are a helpful assistant."}, 
+			{"role": "user", "content": &chat_history}, 
+			{"role": "user", "content": prompt}],
     "max_tokens": 100,
     "temperature": 0.5,
     // "n": 1,
@@ -260,68 +278,33 @@ pub async fn generate_ai_response(
 
   let response = client
     .post(url)
-    .header("Authorization", format!("Bearer {}", api_key))
+    .header("Authorization", format!("Bearer {}", config.api_key))
     .header("Content-Type", "application/json")
     .body(params.to_string())
     .send()
     .await;
 
-  // Check if the response was successful
-  match response {
-    Ok(response) => {
-      if response.status().is_success() {
-        let response_value: Result<serde_json::Value, _> = response.json().await;
+	// then we return the response
+	match response {
+		Ok(res) => {
+			let response = res.json::<ApiResponseStruct>().await;
+			match response {
+				Ok(res) => {
+					debug!("Response: {:?}", res);
+					Ok(res)
+				}
+				Err(why) => {
+					error!("Error parsing response: {:?}", why);
+					Err(())
+				}
+			}
+		}
+		Err(why) => {
+			error!("Error sending request: {:?}", why);
+			Err(())
+		}
+	}
 
-        match response_value {
-          Ok(value) => {
-            // Deserialize the Value into the ApiResponse struct
-            let ai_response: Result<ApiResponse, _> = serde_json::from_value(value.clone());
-
-            match ai_response {
-              Ok(api_response) => {
-                if let Some(choices) = api_response.choices {
-                  // Extract the AI response text from the choices and format it
-                  let response_text = choices[0].message.content.trim().replace('\n', " ");
-                  if response_text.is_empty() {
-                    debug!("AI generated an empty response");
-                    None
-                  } else {
-                    info!("AI generated response: {}", response_text);
-                    Some(response_text)
-                  }
-                } else {
-                  debug!("API response does not contain 'choices' field");
-                  None
-                }
-              }
-              Err(err) => {
-                error!("Error deserializing API response: {:?}", err);
-                None
-              }
-            }
-          }
-          Err(err) => {
-            error!("Error deserializing API response into Value: {:?}", err);
-            None
-          }
-        }
-      } else {
-        // If the API request failed, print the status, headers, and response text for debugging purposes
-        debug!("API request failed with status: {}", response.status());
-        debug!("API request failed with headers: {:?}", response.headers());
-        let response_text = response
-          .text()
-          .await
-          .unwrap_or_else(|_| "Failed to read response text".to_string());
-        debug!("API request failed with response: {}", response_text);
-        None
-      }
-    }
-    Err(err) => {
-      error!("Error sending API request: {:?}", err);
-      None
-    }
-  }
 }
 
 /// Registers the application commands (slash commands) with Discord.
@@ -415,13 +398,13 @@ pub async fn register_application_commands(http: &Http) -> Result<(), Box<dyn st
 pub fn get_env_var(var_name: &str, cmd_arg: &str, matches: Option<&clap::ArgMatches>, ) -> String {
 	if let Some(matches) = matches {
 		if let Some(value) = matches.get_one::<String>(cmd_arg) {
-			return value.to_string();
+			value.to_string();
 		} 	
 	} 
 	if let Ok(value) = std::env::var(var_name) {
-		return value;
+		value
 	} else if let Ok(value) = dotenvy::var(var_name) {
-		return value;
+		value
 	} else {
 		eprintln!("{} not found in command-line arguments, environment variables, or the dotenv file. Please set it up properly.", var_name);
     std::process::exit(1);

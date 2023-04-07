@@ -2,11 +2,38 @@
 RustGPT-Discord is a feature-rich bot built using the Rust programming language and the Serenity library. This bot provides various commands and functionalities, including AI chat integration and privacy settings for messages.
 
 ## **Prerequisites**
+---
 Before setting up the bot, ensure you have the following:
 
 [Rust](https://www.rust-lang.org/tools/install) installed on your system.
 A Discord account and [Discord Developer Portal](https://discord.com/developers/applications) access.
 [OpenAI](https://beta.openai.com/signup/) account for API access.
+
+## **Using the Release Binary**
+---
+If you prefer to use a pre-built binary of the RustGPT-Discord bot, follow these steps:
+
+### **1**. **Download the binary**
+Navigate to the [Releases](https://github.com/MasterHarun/rustgpt-discord/release) page of the RustGPT-Discord repository.
+
+Download the latest release binary for your operating system.
+
+### **2**. **Set up environment variables**
+As explained in the "Set up environment variables" section above, you can choose to use a .env file, command-line flags, or set environment variables to configure the bot.
+
+### **3**. **Run the binary**
+Open a terminal or command prompt and navigate to the folder where you downloaded the release binary.
+
+Run the binary with the necessary command-line flags or ensure the environment variables are set:
+
+```sh
+./rustgpt-discord -t your_token -a your_app_id -o your_api_key
+```
+Replace `your_token`, `your_app_id`, and `your_api_key` with the appropriate values.
+
+The bot should now be running, and it will display a "Connected" message in the terminal.
+
+Remember to follow the instructions in the ["Invite the bot to your Discord server"](#5-invite-the-bot-to-your-discord-server) section to invite the bot to your server if you haven't already done so.
 
 ## **Setup**
 ---

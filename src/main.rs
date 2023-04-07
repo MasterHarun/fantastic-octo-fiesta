@@ -17,9 +17,9 @@ mod utils;
 
 use dotenvy::dotenv;
 
-use crate::handlers::Handler;
+use crate::handlers::{Handler, HandlerStruct};
 use crate::utils::get_env_var;
-use crate::structures::Config;
+use crate::structures::{Config, ConfigStruct};
 
 extern crate sensible_env_logger;
 #[macro_use]
@@ -28,7 +28,8 @@ extern crate log;
 
 #[tokio::main]
 async fn main() {
-
+	#![warn(clippy::disallowed_types)]
+	
   dotenv().ok();
   info!("running");
 
@@ -81,7 +82,7 @@ let matches = Command::new("RustGPT-Discord Bot")
 	let rust_log = get_env_var("RUST_LOG", "rust_log", Some(&matches));
 	let global_logs = get_env_var("GLOBAL_LOG_LEVEL", "global_log_level", Some(&matches));
 	
-	let config = Config::new(api_key, discord_token, app_id, rust_log, global_logs);
+	let config: ConfigStruct = Config::new(api_key, discord_token, app_id, rust_log, global_logs);
   
 	// Initialize the logger
   let _ = try_init_custom_env_and_builder(
@@ -93,10 +94,10 @@ let matches = Command::new("RustGPT-Discord Bot")
   );
 
   let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
-
+	let handler: HandlerStruct = Handler::new(Arc::new(config.clone()));
   let mut client = serenity::Client::builder(&config.discord_token, intents)
     .intents(intents)
-    .event_handler(Handler::new(Arc::new(config)))
+    .event_handler(handler)
     .await
     .expect("Error creating client");
 
