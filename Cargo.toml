@@ -17,8 +17,8 @@ serde_json = { version = "1.0.94", default-features = false, features = [] }
 serde = { version = "1.0.156", default-features = false, features = ["derive"] }
 log = { version = "0.4.17", default-features = false, features = [] }
 sensible-env-logger = { version = "0.3.2", default-features = false, features = [] }
-unicode-segmentation = { version = "1.10.1", default-features = false, features = [] }
 clap = { version = "4.2.0", default-features = false, features = ["std"] }
 rustc-hash = { version = "1.1.0" }
+chrono = { version = "0.4.24", default-features = false, features = ["serde", "clock"] }
 
 [dev-dependencies]

@@ -14,10 +14,11 @@ mod commands;
 mod handlers;
 mod structures;
 mod utils;
+mod users;
 
 use dotenvy::dotenv;
 
-use crate::handlers::{Handler, HandlerStruct};
+use crate::handlers::{HandlerStruct};
 use crate::utils::get_env_var;
 use crate::structures::{Config, ConfigStruct};
 
@@ -93,8 +94,9 @@ let matches = Command::new("RustGPT-Discord Bot")
     sensible_env_logger::pretty::formatted_timed_builder,
   );
 
+	// todo: add ability to load from file or database
   let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
-	let handler: HandlerStruct = Handler::new(Arc::new(config.clone()));
+	let handler: HandlerStruct = HandlerStruct::new(Arc::new(config.clone()));
   let mut client = serenity::Client::builder(&config.discord_token, intents)
     .intents(intents)
     .event_handler(handler)

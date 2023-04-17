@@ -1,30 +1,26 @@
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
-pub struct InteractionData {
-  pub interaction_id: String,
-  pub response_token: String,
-}
-pub trait InteractionDataTrait {
-	fn new(interaction_id: String, response_token: String) -> Self;
-	fn interaction_id(&self) -> String;
-	fn response_token(&self) -> String;
-}
-
-impl InteractionDataTrait for InteractionData {
-	fn new(interaction_id: String, response_token: String) -> Self {
-		Self {
-			interaction_id,
-			response_token,
-		}
-	}
-
-	fn interaction_id(&self) -> String {
-		self.interaction_id.clone()
-	}
-
-	fn response_token(&self) -> String {
-		self.response_token.clone()
-	}
+/// # ApitRequestBody
+/// 
+/// A struct holding the request body for the OpenAI API's completion endpoint.
+/// 
+/// This struct is used to make requests to the OpenAI API's completion endpoint.
+/// 
+/// ### Fields
+/// 
+/// * `model` - The model to use for the completion.
+/// * `messages` - A vector of `Message`s containing the prompt and completion candidates.
+/// * `max_tokens` - The maximum number of tokens to generate.
+/// * `temperature` - The temperature to use for the completion.
+/// * `user` - The user ID of the user making the request.
+/// 
+#[derive(Clone, Debug, Serialize)]
+pub struct ApiRequestBody {
+	pub model: String,
+	pub messages: Vec<Message>,
+	pub max_tokens: u32,
+	pub temperature: f32,
+	pub user: String,
 }
 
 /// A struct holding the response from the OpenAI API's completion endpoint.
@@ -32,8 +28,11 @@ impl InteractionDataTrait for InteractionData {
 /// This struct is returned by the OpenAI API's completion endpoint.
 /// For more information, see the [OpenAI API documentation](https://beta.openai.com/docs/api-reference/completions/create).
 /// 
-/// # fields
+/// ### fields
 /// 
+/// * `id` - The ID of the completion.
+/// * `object` - The type of object.
+/// * `created` - The time the completion was created.
 /// * `choices` - A vector of `ChoiceStruct`s containing the completion candidates.
 /// * `usage` - A `UsageStruct` containing the usage statistics for the OpenAI API's completion endpoint.
 /// 
@@ -65,40 +64,27 @@ impl ApiResponse for ApiResponseStruct {
 	}
 }
 
-// pub trait ApiError {
-// 	fn error(&self) -> String;
-// }
-
-// #[derive(Debug, Deserialize)]
-// pub struct ApiErrorStruct {
-// 	pub error: String,
-// }
-
-// impl ApiError for ApiErrorStruct {
-// 	fn error(&self) -> String {
-// 		self.error.clone()
-// 	}
-// }
 /// A struct containing the usage statistics for the OpenAI API's completion endpoint.
 /// 
 /// This struct is returned by the OpenAI API's completion endpoint.
 /// For more information, see the [OpenAI API documentation](https://beta.openai.com/docs/api-reference/completions/create).
 /// 
-/// # Fields
+/// ### Fields
 /// 
 /// * `prompt_tokens` - The number of tokens in the prompt.
 /// * `completion_tokens` - The number of tokens in the completion.
 /// * `total_tokens` - The total number of tokens in the prompt and completion.
 /// 
-/// # Methods
+/// ### Methods
 /// 
 /// * `prompt_tokens` - Returns the number of tokens in the prompt.
 /// * `completion_tokens` - Returns the number of tokens in the completion.
 /// * `total_tokens` - Returns the total number of tokens in the prompt and completion.
 /// 
-/// # Example
+/// ### Example
 #[derive(Clone, Debug, Deserialize)]
 pub struct UsageStruct {
+	// pub chat_history: String,
 	pub prompt_tokens: u32,
 	pub completion_tokens: u32,
 	pub total_tokens: u32,
@@ -125,21 +111,21 @@ impl Usage for UsageStruct {
 /// This struct is returned by the OpenAI API's completion endpoint.
 /// For more information, see the [OpenAI API documentation](https://beta.openai.com/docs/api-reference/completions/create).
 /// 
-/// # Fields
+/// ### Fields
 /// 
 /// * `text` - The text of the choice.
 /// * `index` - The index of the choice.
 /// * `logprobs` - The log probabilities for the choice.
 /// * `finish_reason` - The reason the choice was finished.
 /// 
-/// # Methods
+/// ### Methods
 /// 
 /// * `text` - Returns the text of the choice.
 /// * `index` - Returns the index of the choice.
 /// * `logprobs` - Returns the log probabilities for the choice.
 /// * `finish_reason` - Returns the reason the choice was finished.
 /// 
-/// # Example
+/// ### Example
 #[derive(Clone, Debug, Deserialize)]
 pub struct ChoiceStruct {
 	pub index: u32,
@@ -171,29 +157,40 @@ impl Choice for ChoiceStruct {
 		self.finish_reason.clone()
 	}
 }
-#[derive(Clone, Debug, Deserialize)]
+
+/// A Struct containing the content and role of a message.
+/// 
+/// This struct is used by the OpenAI API's completion endpoint.
+/// 
+/// ### Fields
+/// 
+/// * `role` - The role of the message. Either the user or AI.
+/// * `content` - The content of the message.
+/// 
+#[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Message {
 	pub role: String,
 	pub content: String,
 }
+
 /// A struct containing the log probabilities for the OpenAI API's completion endpoint.
 /// 
 /// This struct is returned by the OpenAI API's completion endpoint.
 /// For more information, see the [OpenAI API documentation](https://beta.openai.com/docs/api-reference/completions/create).
 /// 
-/// # Fields
+/// ### Fields
 /// 
 /// * `token_logprobs` - The log probabilities for each token.
 /// * `top_logprobs` - The log probabilities for each token.
 /// * `text_offset` - The offset of each token in the text.
 /// 
-/// # Methods
+/// ### Methods
 /// 
 /// * `token_logprobs` - Returns the log probabilities for each token.
 /// * `top_logprobs` - Returns the log probabilities for each token.
 /// * `text_offset` - Returns the offset of each token in the text.
 /// 
-/// # Example
+/// ### Example
 #[derive(Clone, Debug, Deserialize)]
 pub struct LogprobsStruct {
 	pub token_logprobs: Option<Vec<Vec<f32>>>,
@@ -217,8 +214,6 @@ impl Logprobs for LogprobsStruct {
 		self.text_offset.clone().unwrap()
 	}
 }
-
-
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ConfigStruct {
@@ -262,71 +257,3 @@ impl Config for ConfigStruct {
 		self.global_log.clone()
 	}
 }
-
-// pub struct Prompt {
-// 	pub prompt: String,
-// 	pub max_tokens: u32,
-// 	pub temperature: f32,
-// 	pub top_p: f32,
-// 	pub presence_penalty: f32,
-// 	pub frequency_penalty: f32,
-// 	pub best_of: u32,
-// 	pub n: u32,
-// 	pub stream: bool,
-// 	pub logprobs: Option<u32>,
-// 	pub echo: bool,
-// 	pub stop: Option<String>,
-// }
-// s
-// // / A struct containing the parameters for the OpenAI API's completion endpoint.
-// // / 
-// // / See the [OpenAI API docs](https://beta.openai.com/docs/api-reference/completions/create) for more information.
-// // / 
-// // / # Examples
-// // / 
-// // / ```
-// // / 
-// // pub struct Personality {
-// 	pub personality: String,
-// 	pub max_tokens: u32,
-// 	pub temperature: f32,
-// 	pub top_p: f32,
-// 	pub presence_penalty: f32,
-// 	pub frequency_penalty: f32,
-// 	pub best_of: u32,
-// 	pub n: u32,
-// 	pub stream: bool,
-// 	pub logprobs: Option<u32>,
-// 	pub echo: bool,
-// 	pub stop: Option<String>,
-// }
-
-// pub trait OpenAI {
-// 	fn new(api_key: String) -> Self;
-// 	fn get_completion(&self, prompt: Prompt) -> Result<dyn ApiResponse, Box<dyn std::error::Error>>;
-// 	fn get_personality(&self, personality: Personality) -> Result<dyn ApiResponse, Box<dyn std::error::Error>>;
-// }
-
-// /// A struct containing the parameters for the OpenAI API's completion endpoint.
-// /// 
-// /// See the [OpenAI API docs](https://beta.openai.com/docs/api-reference/completions/create) for more information.
-// /// 
-// pub struct OpenAIImpl {
-// 	api_key: String,
-// }
-//  impl OpenAI for OpenAIImpl {
-// 	fn new(api_key: String) -> Self {
-// 		Self {
-// 			api_key,
-// 		}
-// 	}
-	
-// 	fn get_completion(&self, prompt: Prompt) -> Result<dyn ApiResponse, Box<dyn std::error::Error>> {
-			
-// 	}
-
-// 	fn get_personality(&self, personality: Personality) -> Result<dyn ApiResponse, Box<dyn std::error::Error>> {
-			
-// 	}
-
-// }
