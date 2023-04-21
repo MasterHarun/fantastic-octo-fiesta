@@ -76,7 +76,7 @@ let matches = Command::new("RustGPT-Discord Bot")
 		.default_value("off")
 	)
 	.get_matches();
-
+ //todo: rework this
 	let api_key = get_env_var("OPENAI_API_KEY", "openai_api_key", Some(&matches));
 	let discord_token = get_env_var("DISCORD_TOKEN", "discord_token", Some(&matches));
 	let app_id = get_env_var("DISCORD_APP_ID", "discord_app_id", Some(&matches));
@@ -97,6 +97,7 @@ let matches = Command::new("RustGPT-Discord Bot")
 	// todo: add ability to load from file or database
   let intents = GatewayIntents::GUILD_MESSAGES | GatewayIntents::MESSAGE_CONTENT;
 	let handler: HandlerStruct = HandlerStruct::new(Arc::new(config.clone()));
+	
   let mut client = serenity::Client::builder(&config.discord_token, intents)
     .intents(intents)
     .event_handler(handler)

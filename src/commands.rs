@@ -1,10 +1,14 @@
 use serenity::{
-    client::Context,
-    model::application::interaction::application_command::ApplicationCommandInteraction,
+  client::Context,
+  model::application::interaction::application_command::ApplicationCommandInteraction,
 };
 
-use crate::{structures::{ApiResponse, Choice, Usage}, handlers::{ HandlerStruct}, users::{UserChatHistoryEntry, Personality, CommandState}};
 use crate::utils::*;
+use crate::{
+  handlers::HandlerStruct,
+  structures::{ApiResponse, Choice, Usage},
+  users::{Personality, UserChatHistoryEntry},
+};
 
 /// Handles the `/chat` command
 ///
@@ -15,9 +19,9 @@ use crate::utils::*;
 /// * `handler` - The Handler struct that contains the bot's state
 /// * `ctx` - The Serenity Context for the command
 /// * `command` - The ApplicationCommandInteraction data
-/// 
+///
 pub async fn chat_command(
-	handler: &HandlerStruct,
+  handler: &HandlerStruct,
   ctx: &Context,
   command: &ApplicationCommandInteraction,
 ) {
@@ -29,82 +33,98 @@ pub async fn chat_command(
     .and_then(|value| value.as_str())
     .unwrap_or("");
 
-	let user_id = command.user.id;
-	let channel_id = command.channel_id;
-	let user_channel_key = (user_id, channel_id);
-	let user_name = command.user.name.clone();
-	// if the user is not in the map, add them
-	// log the user's prompt
+  let user_id = command.user.id;
+  let channel_id = command.channel_id;
+  let user_channel_key = (user_id, channel_id);
+  let user_name = command.user.name.clone();
+  // if the user is not in the map, add them
+  // log the user's prompt
   info!(
-		"User {}#{}: {}",
+    "User {}#{}: {}",
     user_name, command.user.discriminator, prompt
   );
-	
-	// Generate the AI response and handle any errors
-	let response = match generate_ai_response(handler, prompt, user_channel_key).await {
-		Ok(response) => response,
-		Err(e) => {
-			error!("Error generating response: {:?}", e);
-			return;
-		}
-	};
-	let message = response.choices().first().unwrap().message().content.clone();
-	
-	let chat_privacy = handler.with_user(user_id, |user| user.with_settings(|settings| settings.chat_privacy));
 
-	if (edit_original_message_or_create_followup(
-		ctx, 
-		command, 
-		message.clone(), 
-		&chat_privacy.unwrap(),
-	).await).is_err() {
-		return;
-	}
+  // Generate the AI response and handle any errors
+  let response = match generate_ai_response(handler, prompt, user_channel_key).await {
+    Ok(response) => response,
+    Err(e) => {
+      error!("Error generating response: {:?}", e);
+      return;
+    }
+  };
+  let message = response
+    .choices()
+    .first()
+    .unwrap()
+    .message()
+    .content
+    .clone();
 
-	let usage = response.usage();
-	let total_tokens = usage.total_tokens();
-	let prompt_tokens = usage.prompt_tokens();
-	let completion_tokens = usage.completion_tokens();
-	let combined_message = format!("user: {}\n ai: {}", prompt, message);
+  let chat_privacy = handler.with_user(user_id, |user| {
+    user.with_settings(|settings| settings.chat_privacy)
+  });
 
-	let history_entry = UserChatHistoryEntry::new(
-		combined_message, 
-		prompt.to_owned(), 
-		message, 
-		total_tokens, 
-		prompt_tokens, 
-		completion_tokens
-	);
+  if (edit_original_message_or_create_followup(
+    ctx,
+    command,
+    message.clone(),
+    &chat_privacy.unwrap(),
+  )
+  .await)
+    .is_err()
+  {
+    return;
+  }
 
-	if !handler.user_exists(user_id) {
-		handler.add_user(user_id);
-	}
-	
-	handler.modify_user(user_id, |user| {
-		let token_limit = user.with_settings(|settings| *settings.get_model().get_token_limit());
-		user.modify_usage(|usage| {
-			if !usage.contains_channel(channel_id) {
-				usage.add_channel(channel_id);
-			}
-			usage.add_total_tokens(history_entry.get_total_tokens());
-			usage.increase_chat_count();
-			debug!("total user tokens: {:?}", usage.get_total_tokens());
+  let usage = response.usage();
+  let total_tokens = usage.total_tokens();
+  let prompt_tokens = usage.prompt_tokens();
+  let completion_tokens = usage.completion_tokens();
+  let combined_message = format!("user: {}\n ai: {}", prompt, message);
 
-			usage.modify_channel_data(channel_id, |channel_data| {
-				channel_data.add_chat_history_entry(history_entry.clone());
-				let user_tokens = channel_data.get_tokens_used();
-				debug!("User usage: {:?}, token_limit: {:?}", user_tokens, token_limit);
-				if user_tokens > &token_limit {
-					channel_data.remove_oldest_entry();
-				}
-				
-			});
-		});
-		
-	}).unwrap_or_else(|e| {
-		error!("Error modifying user: {:?}", e);
-	});
-	
+  let history_entry = UserChatHistoryEntry::new(
+    combined_message,
+    prompt.to_owned(),
+    message,
+    total_tokens,
+    prompt_tokens,
+    completion_tokens,
+  );
+
+  if !handler.user_exists(user_id) {
+    handler.add_user(user_id);
+  }
+
+  handler
+    .modify_user(user_id, |user| {
+      let token_limit = user.with_settings(|settings| *settings.get_model().get_token_limit());
+      user.modify_usage(|usage| {
+        if !usage.contains_channel(channel_id) {
+          usage.add_channel(channel_id);
+        }
+        // ?? why is this here?
+        // !? The only time the amount of tokens a user has used is at chat time when they are sent
+        // !? Even if the system message is changed by the personality command, it will still be the same amount of tokens
+        usage.add_total_tokens(history_entry.get_total_tokens());
+        usage.increase_chat_count();
+        debug!("total user tokens: {:?}", usage.get_total_tokens());
+
+        usage.modify_channel_data(channel_id, |channel_data| {
+          channel_data.add_chat_history_entry(history_entry.clone());
+          let user_tokens = channel_data.get_tokens_used();
+          debug!(
+            "User usage: {:?}, token_limit: {:?}",
+            user_tokens, token_limit
+          );
+          if user_tokens > &token_limit {
+            channel_data.remove_oldest_entry();
+          }
+        });
+      });
+    })
+    .unwrap_or_else(|e| {
+      error!("Error modifying user: {:?}", e);
+    });
 }
 
 /// Resets the chat history for the user and channel.
@@ -120,20 +140,23 @@ pub async fn reset_command(
   ctx: &Context,
   command: &ApplicationCommandInteraction,
 ) {
-	let channel_id = command.channel_id;
-	let user_id = command.user.id;
+  let channel_id = command.channel_id;
+  let user_id = command.user.id;
 
-	user.modify_user(user_id, |user| {
-		user.modify_usage(|usage| usage.reset_channel_usage(channel_id));
-	}).unwrap_or_else(|e| {
-		error!("Error modifying user: {:?}", e);
-	});
-	let chat_privacy = user.with_user(command.user.id, |user| user.with_settings(|settings| settings.chat_privacy));
-	let chat_privacy = chat_privacy.unwrap();
+  user
+    .modify_user(user_id, |user| {
+      user.modify_usage(|usage| usage.reset_channel_usage(channel_id));
+    })
+    .unwrap_or_else(|e| {
+      error!("Error modifying user: {:?}", e);
+    });
+  let chat_privacy = user.with_user(command.user.id, |user| {
+    user.with_settings(|settings| settings.chat_privacy)
+  });
+  let chat_privacy = chat_privacy.unwrap();
   let reset_message = "Chat history has been reset.".to_string();
-	
-  if (create_followup_message(ctx, command, reset_message, &chat_privacy).await).is_err() {
-	}
+
+  if (create_followup_message(ctx, command, reset_message, &chat_privacy).await).is_err() {}
 }
 
 /// Handles the `/private` command
@@ -145,19 +168,13 @@ pub async fn reset_command(
 /// * `user` - The user to set the chat privacy for
 /// * `ctx` - The Serenity Context for the command
 /// * `command` - The ApplicationCommandInteraction data
-/// 
+///
 pub async fn private_command(
   user: &HandlerStruct,
   ctx: &Context,
   command: &ApplicationCommandInteraction,
 ) {
-  set_chat_privacy(
-    user,
-    true,
-    ctx,
-    command,
-  )
-  .await;
+  set_chat_privacy(user, true, ctx, command).await;
 }
 
 /// Handles the `/public` command
@@ -169,142 +186,168 @@ pub async fn private_command(
 /// * `chat_privacy` - The Arc<Mutex<HashMap<UserId, bool>>> containing chat privacy settings
 /// * `ctx` - The Serenity Context for the command
 /// * `command` - The ApplicationCommandInteraction data
-/// 
+///
 pub async fn public_command(
   user: &HandlerStruct,
   ctx: &Context,
   command: &ApplicationCommandInteraction,
 ) {
-  set_chat_privacy(
-    user,
-    false,
-    ctx,
-    command,
-  )
-  .await;
+  set_chat_privacy(user, false, ctx, command).await;
 }
 
-
 /// Handles the `/personality` command
-/// 
+///
 /// Changes the personality of the AI
-/// 
+///
 /// # Arguments
-/// 
+///
 /// * `handler` - The Arc<Mutex<Handler>> containing the chat privacy settings
 /// * `ctx` - The Serenity Context for the command
 /// * `command` - The ApplicationCommandInteraction data
-/// 
+///
 /// # Example
-// /// 
+// ///
 pub async fn personality_command(
-	// handler: &mut HandlerStruct,
+  handler: &HandlerStruct,
+  ctx: &Context,
+  command: &ApplicationCommandInteraction,
+) {
+  // debug!("Personality command: {:?}", command);
+  // fixme: The first message after changing the personality isnt set to the new personality
+  let user_id = command.user.id;
+  let personas = handler.get_personas();
+
+  debug!("Personality command: {:#?}", command);
+  let new_personality = command
+    .data
+    .options
+    .get(0)
+    .and_then(|option| option.value.as_ref())
+		.and_then(|value| value.as_str())
+		.unwrap_or("default");
+  let new_personality = new_personality;
+  for persona in personas {
+    if persona.name == new_personality {
+      handler
+        .modify_user(user_id, |user| {
+          user.modify_settings(|settings| settings.set_personality(persona.clone()));
+          // info!("Personality command selected: {:?}", persona.name)
+        })
+        .unwrap_or_else(|e| {
+          error!("Error modifying user: {:?}", e);
+        });
+    }
+  }
+
+  let message = format!("You are now using the {:?} personality.", new_personality);
+  let chat_privacy = handler.with_user(user_id, |user| {
+    user.with_settings(|settings| settings.chat_privacy)
+  });
+  let chat_privacy = chat_privacy.unwrap();
+  if let Err(err) = create_followup_message(ctx, command, message, &chat_privacy).await {
+    error!("Error sending follow-up message: {:?}", err);
+  }
+}
+
+pub async fn persona_control_command(
 	handler: &HandlerStruct,
 	ctx: &Context,
 	command: &ApplicationCommandInteraction,
 ) {
 	let user_id = command.user.id;
-	let personality_selected = command
-			.data
-			.options
-			.get(0)
-			.and_then(|opt| opt.value.as_ref())
-			.and_then(|value| value.as_str())
-			.unwrap_or("");
+	debug!("Persona control command: {:#?}", command);
+	let name = command.data.options.get(0).unwrap().name.as_str();
+	let mut message = Default::default();
+	match name {
+		"add" => {
+			let command_data = command.data.options.get(0).unwrap();
+			debug!("Name: {:#?}", name);
+			let name = command_data
+				.options
+				.get(0)
+				.and_then(|opt| opt.value.as_ref())
+				.and_then(|value| value.as_str())
+				.unwrap_or("");
+			debug!("Name: {:#?}", name);
+			let description = command_data
+				.options
+				.get(1)
+				.and_then(|opt| opt.value.as_ref())
+				.and_then(|value| value.as_str())
+				.unwrap_or("");
+			debug!("Description: {:#?}", description);
+			let prompt = command_data
+				.options
+				.get(2)
+				.and_then(|opt| opt.value.as_ref())
+				.and_then(|value| value.as_str())
+				.unwrap_or("");
+			debug!("Prompt: {:#?}", prompt);
 
+			handler
+				.modify_personas(|personas| {
+					if let Some(personality) = personas.iter_mut().find(|p| p.name == *name) {
+						personality.prompt = prompt.to_string();
+						personality.description = description.to_string();
+						// personality.tokens = tokens;
+					} else {
+						personas.push(Personality {
+							name: name.to_string(),
+							description: description.to_string(),
+							prompt: prompt.to_string(),
+							tokens: 0,
+						});
+					}
+				})
+				.unwrap_or_else(|err| error!("Error modifying personality: {:?}", err));
 
-	let personas = handler.get_personas();
-	if let Some(new_personality) = personas.iter().find(|p| p.name == personality_selected) {
-		handler.modify_user(user_id, |user| {
-			user.modify_settings(|settings| settings.set_personality(new_personality.clone()));
-		}).unwrap_or_else(|e| {
-			error!("Error modifying user: {:?}", e);
-		});
-
-		let message = format!(
-			"You are now using the {} personality.",
-			personality_selected
-		);
-		let chat_privacy = handler.with_user(user_id, |user| user.with_settings(|settings| settings.chat_privacy));
-		let chat_privacy = chat_privacy.unwrap();
-		if let Err(err) = create_followup_message(ctx, command, message, &chat_privacy).await {
-			error!("Error sending follow-up message: {:?}", err);
+			message = format!(
+				"Personality {} has been created.",
+				name
+			);
+			
 		}
+		"remove" => {
+			let name = command.data.options.get(0).unwrap().options.get(0).unwrap();
+			debug!("Name: {:#?}", name);
+			let name = name
+				.options
+				.get(0)
+				.and_then(|opt| opt.value.as_ref())
+				.and_then(|value| value.as_str())
+				.unwrap_or("");
+			debug!("Name: {:#?}", name);
+
+			handler
+				.modify_personas(|personas| {
+					personas.retain(|p| p.name != *name);
+				})
+				.unwrap_or_else(|err| error!("Error modifying personality: {:?}", err));
+
+			message = format!(
+				"Personality {} has been deleted.",
+				name
+			);
+			let command_id = handler.get_command_id("persona-control").await.unwrap();
+			// ?? remove the old command
+			let _ = ctx.http.delete_global_application_command(command_id).await;
+			// ?? create the new command
+			// let _ = register_application_commands(handler, &ctx.http).await;
+		}
+		_ => {},
 	}
-}
+	let command_id = handler.get_command_id("personality").await.unwrap();
+	// ?? remove the old command
+	let _ = ctx.http.delete_global_application_command(command_id).await;
+	// ?? create the new command
+	let _ = register_application_commands(handler, &ctx.http).await;
 
+	let chat_privacy = handler.with_user(user_id, |user| {
+		user.with_settings(|settings| settings.chat_privacy)
+	});
+	let chat_privacy = chat_privacy.unwrap();
 
-
-/// Handles the `/add-personality` command
-/// 
-/// Adds a new personality to the bot
-/// 
-/// # Arguments
-/// 
-/// * `handler` - The Arc<Mutex<Handler>> containing the chat privacy settings
-/// * `ctx` - The Serenity Context for the command
-/// * `command` - The ApplicationCommandInteraction data
-/// 
-pub async fn add_personality_command(
-	handler: &HandlerStruct,
-	ctx: &Context,
-	command: &ApplicationCommandInteraction,
-) {
-	let user_id = command.user.id;	
-
-	let user_response = command
-		.data
-		.options
-		.get(0)
-		.and_then(|opt| opt.value.as_ref())
-		.and_then(|value| value.as_str())
-		.unwrap_or("");
-
-	// let command_state = handler.with_user(user_id, |user| user.with_settings(|settings| settings.get_command_state()));
-	let command_state = handler.with_user(user_id, |user| user.with_settings(|settings| settings.command_state.clone()));
-	let command_state = command_state.unwrap();
-	// todo: calculate the amount of tokens for the prompt
-	let tokens = 0;
-	match command_state {
-		CommandState::None => {
-			handler.modify_personas(|personas| {
-				personas.push(Personality::new(user_response.to_string(), "".to_string(), tokens));
-			}).unwrap_or_else(|err| error!("Error adding new personality: {:?}", err));
-			handler.modify_user(user_id, |user| {
-				user.modify_settings(|settings| settings.set_command_state(CommandState::PersonalityCommandState(user_response.to_string())));
-			}).unwrap_or_else(|err| error!("Error setting command state: {:?}", err));
-
-			let message = format!(
-				"Personality {} has been created. What is the prompt for this personality?",
-				user_response
-			);
-			let chat_privacy = handler.with_user(user_id, |user| user.with_settings(|settings| settings.chat_privacy));
-			let chat_privacy = chat_privacy.unwrap();
-			if let Err(err) = create_followup_message(ctx, command, message, &chat_privacy).await {
-				error!("Error sending follow-up message: {:?}", err);
-			}
-		},
-		CommandState::PersonalityCommandState(name) => {
-			// create a new personality
-			handler.modify_personas(|personas| {
-				if let Some(personality) = personas.iter_mut().find(|p| p.name == *name) {
-					personality.prompt = user_response.to_string();
-					personality.tokens = tokens;
-				}
-			}).unwrap_or_else(|err| error!("Error modifying personality: {:?}", err));
-			handler.modify_user(user_id, |user| {
-				user.modify_settings(|settings| settings.set_command_state(CommandState::None));
-			}).unwrap_or_else(|err| error!("Error setting command state: {:?}", err));
-
-			let message = format!(
-				"Personality has been created. The prompt {} has been set.",
-				user_response
-			);
-			let chat_privacy = handler.with_user(user_id, |user| user.with_settings(|settings| settings.chat_privacy));
-			let chat_privacy = chat_privacy.unwrap();
-			if let Err(err) = create_followup_message(ctx, command, message, &chat_privacy).await {
-				error!("Error sending follow-up message: {:?}", err);
-			}
-		},
+	if let Err(err) = create_followup_message(ctx, command, message, &chat_privacy).await {
+		error!("Error sending follow-up message: {:?}", err);
 	}
 }

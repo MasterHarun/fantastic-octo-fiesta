@@ -15,7 +15,7 @@ use serenity::{
   model::{
     gateway::Ready,
     id::{UserId},
-    prelude::interaction::Interaction,
+    prelude::{interaction::Interaction, command::CommandOptionType},
   },
   prelude::{Context, EventHandler},
 };
@@ -85,6 +85,7 @@ impl HandlerStruct {
 			modify(&mut personas);
 			Ok(())
 	}
+	//todo: at some point, we need to make this read from a db
 	pub fn set_default_personas(&self) {
 		let mut personas = match self.personas.lock() {
 			Ok(p) => p,
@@ -93,20 +94,17 @@ impl HandlerStruct {
 					return;
 			}
 	};
-	let personas_json = match std::fs::read_to_string("personas.json") {
-			Ok(json) => json,
-			Err(e) => {
-					eprintln!("Error reading file: {}", e);
-					return;
-			}
-	};
-	let personas_vec: Vec<Personality> = match serde_json::from_str(&personas_json) {
+	debug!("Setting default personas");
+	let json_contents = include_str!("personas.json");
+
+	let personas_vec: Vec<Personality> = match serde_json::from_str(&json_contents) {
 			Ok(vec) => vec,
 			Err(e) => {
 					eprintln!("Error parsing json: {}", e);
 					return;
 			}
 	};
+	debug!("Personas: {:?}\n", personas_vec.iter().map(|p| p.name.clone()).collect::<Vec<String>>());
 	for persona in personas_vec {
 			personas.push(persona);
 	}
@@ -126,7 +124,31 @@ impl HandlerStruct {
   pub fn get_config(&self) -> Arc<ConfigStruct> {
     self.config.clone()
   }
-	
+
+	pub async fn get_command_id(&self, name: &str) -> Option<u64> {
+		let http = Arc::new(Http::new_with_application_id(
+			&self.config.discord_token,
+			self.config.app_id.parse::<u64>().unwrap(),
+		));
+		let commands = match http.get_global_application_commands().await {
+			Ok(c) => c,
+			Err(e) => {
+				error!("Error getting commands: {:?}", e);
+				return None;
+			}
+		};
+		for command in commands {
+			if command.name == name {
+				return Some(command.id.0);
+			}
+		}
+		None
+	}
+
+	// we just need to add the new option to the existing command 
+	pub async fn edit_command(&self, command_id: u64, command_options: Vec<CommandOptionType>) {
+			
+	}
 }
 
 #[async_trait]
@@ -139,7 +161,7 @@ impl EventHandler for HandlerStruct {
     ));
 		// set the default personas for the bot
 		self.set_default_personas();
-    if let Err(e) = register_application_commands(&http).await {
+    if let Err(e) = register_application_commands(self, &http,).await {
       error!("Error registering application commands: {:?}", e);
     }
   }
@@ -181,7 +203,7 @@ impl EventHandler for HandlerStruct {
         "reset" => reset_command(self, &ctx, &command).await,
         "private" => private_command(self, &ctx, &command).await,
         "public" => public_command(self, &ctx, &command).await,
-				"addpersonality" => add_personality_command(self, &ctx, &command).await,
+				"persona-control" => persona_control_command(self, &ctx, &command).await,
         _ => {
           error!("Unknown command: {}", command.data.name);
         }

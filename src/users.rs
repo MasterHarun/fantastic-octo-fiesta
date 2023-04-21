@@ -424,13 +424,15 @@ pub struct Personality {
 	pub name: String,
 	pub prompt: String,
 	pub tokens: u64,
+	pub description: String,
 }
 impl Personality {
-	pub fn new(name: String, prompt: String, tokens: u64) -> Self {
+	pub fn new(name: String, prompt: String, tokens: u64, description: String) -> Self {
 		Self {
 			name,
 			prompt,
 			tokens,
+			description,
 		}
 	}
 	pub fn default() -> Self {
@@ -438,6 +440,7 @@ impl Personality {
 			name: "default".to_string(),
 			prompt: "You are a helpful assistant.".to_string(),
 			tokens: 0,
+			description: "No description".to_string(),
 		}
 	}
 	
